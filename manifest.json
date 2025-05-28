@@ -1,5 +1,5 @@
 {
-  "name": "Voice Notes PWA",
+  "name": "Voice Notes",
   "short_name": "VoiceNotes",
   "description": "A modern, installable, mobile-friendly PWA for voice notes. Record, transcribe, summarize, and manage your notes offline.",
   "id": "/",
