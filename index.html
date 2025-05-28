@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+  <title>Voice Notes PWA</title>
+</head>
+<body>
+  <div id="app">
+    <h1>Voice Notes</h1>
+    <div class="recorder-controls">
+      <button id="recordBtn">Start Recording</button>
+      <span id="recordingStatus"></span>
+    </div>
+    <div class="session-title-section">
+      <input id="sessionTitle" type="text" placeholder="Session Title (optional)" maxlength="100" />
+    </div>
+    <div class="transcript-section">
+      <h2>Transcript</h2>
+      <textarea id="transcript"></textarea>
+      <button id="copyTranscriptBtn" title="Copy Transcript">Copy</button>
+      <button id="sendToLLMBtn">Summarize</button>
+      <div class="summarize-controls" id="summarizeControls"></div>
+    </div>
+    <div class="status-bar" id="statusBar"></div>
+    <div class="summary-section">
+      <h2>Summary</h2>
+      <div id="summary"></div>
+      <button id="copySummaryBtn" title="Copy Summary">Copy</button>
+    </div>
+    <div class="history-section-bottom">
+      <h2>History</h2>
+      <ul id="historyList"></ul>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
