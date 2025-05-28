@@ -98,10 +98,72 @@ function stopRecording() {
   recordingStatus.textContent = '';
 }
 
-// Update recordBtn event to support Web Speech API fallback
+// Vosk integration
+let useVosk = false;
+let voskLoaded = false;
+
+// Try to load Vosk if available
+async function tryLoadVosk() {
+  try {
+    const { loadVosk } = await import('./vosk-integration.js');
+    await loadVosk();
+    voskLoaded = true;
+    statusBar.textContent = 'Vosk speech recognition ready (offline)';
+  } catch (e) {
+    voskLoaded = false;
+    statusBar.textContent = 'Vosk not available: ' + e.message;
+  }
+}
+
+// Add a toggle for Vosk (offline) vs Web Speech API (online)
+const voskToggle = document.createElement('button');
+voskToggle.id = 'voskToggleBtn';
+voskToggle.textContent = 'Use Offline Speech (Vosk)';
+voskToggle.title = 'Toggle between offline (Vosk) and online (Web Speech API) speech recognition';
+voskToggle.style.marginRight = '8px';
+voskToggle.addEventListener('click', async () => {
+  useVosk = !useVosk;
+  voskToggle.textContent = useVosk ? 'Use Online Speech (Web Speech API)' : 'Use Offline Speech (Vosk)';
+  if (useVosk && !voskLoaded) await tryLoadVosk();
+  statusBar.textContent = useVosk ? 'Vosk (offline) mode enabled' : 'Web Speech API (online) mode enabled';
+});
+if (transcriptSection) {
+  transcriptSection.insertBefore(voskToggle, transcriptSection.querySelector('#copyTranscriptBtn'));
+}
+
+let voskStopFn = null;
+
+async function startVoskRecognitionWrapper() {
+  const { startVoskRecognition, stopVoskRecognition } = await import('./vosk-integration.js');
+  transcriptText = '';
+  await startVoskRecognition((text, isFinal) => {
+    if (isFinal) {
+      transcriptText += text + ' ';
+      transcriptArea.value = transcriptText;
+    } else {
+      transcriptArea.value = transcriptText + text;
+    }
+    transcriptArea.dispatchEvent(new Event('input'));
+  });
+  voskStopFn = stopVoskRecognition;
+  recordingStatus.textContent = 'Recording (offline)...';
+  statusBar.textContent = 'Listening (Vosk offline)';
+}
+
+// Update recordBtn event to support Vosk
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    stopRecording();
+    if (useVosk && voskStopFn) voskStopFn();
+    else stopRecording();
+    isRecording = false;
+    recordBtn.textContent = 'Start Recording';
+    recordingStatus.textContent = '';
+    return;
+  }
+  if (useVosk) {
+    isRecording = true;
+    recordBtn.textContent = 'Stop Recording';
+    await startVoskRecognitionWrapper();
   } else {
     if (supportsWebSpeechAPI() && navigator.onLine) {
       isRecording = true;
