@@ -1,10 +1,17 @@
 {
   "name": "Voice Notes PWA",
   "short_name": "VoiceNotes",
+  "description": "A modern, installable, mobile-friendly PWA for voice notes. Record, transcribe, summarize, and manage your notes offline.",
+  "id": "/",
   "start_url": ".",
+  "scope": ".",
   "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay"],
   "background_color": "#f7f7f7",
   "theme_color": "#1976d2",
+  "orientation": "portrait",
+  "lang": "en",
+  "dir": "ltr",
   "icons": [
     {
       "src": "icon-192.png",
@@ -16,5 +23,16 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot-1.png",
+      "sizes": "540x960",
+      "type": "image/png",
+      "label": "Main UI"
+    }
+  ],
+  "categories": ["productivity", "notes", "audio", "tools"],
+  "launch_handler": { "client_mode": "auto" },
+  "prefer_related_applications": false
 }

@@ -521,6 +521,46 @@ installBtn.addEventListener('click', async () => {
   installBtn.disabled = false;
 });
 
+// --- Service Worker update notification logic ---
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').then(reg => {
+    // Listen for updates
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      if (newWorker) {
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            showUpdateBanner(newWorker, reg);
+          }
+        });
+      }
+    });
+    // Also check if there's already a waiting SW
+    if (reg.waiting) {
+      showUpdateBanner(reg.waiting, reg);
+    }
+  });
+}
+
+function showUpdateBanner(worker, reg) {
+  const banner = document.getElementById('updateBanner');
+  if (!banner) return;
+  banner.style.display = 'block';
+  banner.onclick = () => {
+    worker.postMessage({ action: 'skipWaiting' });
+    banner.textContent = 'Updating...';
+    setTimeout(() => {
+      window.location.reload();
+    }, 800);
+  };
+}
+// Listen for controllerchange to reload after update
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+}
+
 // On page load, show history
 window.addEventListener('DOMContentLoaded', renderHistory);
 
@@ -532,5 +572,6 @@ window.addEventListener('DOMContentLoaded', renderHistory);
 // - IndexedDB storage
 // - PWA install prompt
 // - Sidebar toggle logic
+// - Service Worker update notification logic
 
 // We'll implement each feature in order.

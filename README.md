@@ -28,7 +28,8 @@ cd <your-repo>
 - `app.js` — Main app logic
 - `manifest.json` — PWA manifest
 - `service-worker.js` — Offline support
-- `worker.js` — (Optional) For local summarization logic
+- `worker.js` — Example Cloudflare Worker backend for summarization (not used in the frontend, but provided for reference if you want to deploy your own summarization backend). See the section below for details.
+- `screenshot-1.png` — Example screenshot for manifest and store listing
 - `README.md`, `LICENSE`
 
 ### 3. Run Locally
@@ -78,6 +79,16 @@ Thumbs.db
 node_modules/
 *.log
 ```
+
+---
+
+## Cloudflare Worker Backend (Optional)
+
+This repo includes a sample `worker.js` file for a Cloudflare Worker that provides backend summarization using Facebook BART. This is **not used directly in the frontend**—the deployed app uses the endpoint set in `app.js` (by default, the author's Cloudflare Worker). If you want to deploy your own backend:
+
+1. Copy `worker.js` to your own Cloudflare Worker project.
+2. Set up the Facebook BART model on Cloudflare (see [Cloudflare AI Docs](https://developers.cloudflare.com/workers-ai/models/)).
+3. Deploy your Worker and update the `endpoint` variable in `app.js` to your new URL.
 
 ---
 
