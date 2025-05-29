@@ -1,179 +1,176 @@
-// --- Feature 1: Audio Recording & Online Transcription (Web Speech API) ---
+// --- Feature 1: Audio Recording & Offline Transcription (Vosk, default) ---
+import { startVoskRecognition, stopVoskRecognition, loadVosk } from './vosk-integration.js';
+import { startWebSpeechRecognition, stopWebSpeechRecognition } from './webspeech-integration.js';
 
 const recordBtn = document.getElementById('recordBtn');
 const recordingStatus = document.getElementById('recordingStatus');
 const transcriptArea = document.getElementById('transcript');
-const sendToLLMBtn = document.getElementById('sendToLLMBtn');
 const statusBar = document.getElementById('statusBar');
-const summary = document.getElementById('summary');
-const historyList = document.getElementById('historyList');
-let selectedSummaryType = 'standard';
-let selectedSummaryLength = 'default';
 const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
-const copySummaryBtn = document.getElementById('copySummaryBtn');
-const sessionTitleInput = document.getElementById('sessionTitle');
-const clearHistoryBtn = document.getElementById('clearHistoryBtn');
-
-// Remove summary style/length controls from UI
-const summarizeControls = document.getElementById('summarizeControls');
-if (summarizeControls) {
-  summarizeControls.remove();
-}
-
-// Add a paste button for testing
-const pasteTestBtn = document.createElement('button');
-pasteTestBtn.id = 'pasteTestBtn';
-pasteTestBtn.textContent = 'Paste Text';
-pasteTestBtn.title = 'Paste clipboard text into transcript';
-pasteTestBtn.style.marginRight = '8px';
-
 const transcriptSection = document.querySelector('.transcript-section');
-if (transcriptSection) {
-  transcriptSection.insertBefore(pasteTestBtn, transcriptSection.querySelector('#copyTranscriptBtn'));
-}
-
-pasteTestBtn.addEventListener('click', async () => {
-  try {
-    const text = await navigator.clipboard.readText();
-    transcriptArea.value = text;
-    transcriptArea.dispatchEvent(new Event('input'));
-    statusBar.textContent = 'Transcript pasted from clipboard.';
-  } catch (e) {
-    statusBar.textContent = 'Failed to paste: ' + e.message;
-  }
-});
-
+const sendToLLMBtn = document.getElementById('sendToLLMBtn');
+const modeSwitch = document.getElementById('modeSwitch');
+const historyList = document.getElementById('historyList');
+const summaryDiv = document.getElementById('summary');
+const sessionTitleInput = document.getElementById('sessionTitle');
 let isRecording = false;
-let recognition = null;
 let transcriptText = '';
+let lastSummary = '';
 
-function supportsWebSpeechAPI() {
-  return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-}
+// Helper to start the correct mode, with overlap support
+let overlapTimeout = null;
+let activeRecognizer = null; // 'online' or 'offline'
+let pendingRecognizer = null; // 'online' or 'offline'
 
-function startWebSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
-  recognition.interimResults = true;
-  recognition.continuous = true;
-  transcriptText = '';
-
-  recognition.onstart = () => {
-    recordingStatus.textContent = 'Recording...';
-    statusBar.textContent = 'Listening (Web Speech API)';
-    transcriptArea.value = '';
-  };
-  recognition.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        transcriptText += event.results[i][0].transcript + ' ';
-      } else {
-        interim += event.results[i][0].transcript;
-      }
-    }
-    transcriptArea.value = transcriptText + interim;
-  };
-  recognition.onerror = (event) => {
-    statusBar.textContent = 'Speech recognition error: ' + event.error;
-    stopRecording();
-  };
-  recognition.onend = () => {
-    recordingStatus.textContent = '';
-    statusBar.textContent = 'Stopped.';
-    isRecording = false;
-    recordBtn.textContent = 'Start Recording';
-  };
-  recognition.start();
-}
-
-function stopRecording() {
-  if (recognition) {
-    recognition.stop();
-    recognition = null;
-  }
-  isRecording = false;
-  recordBtn.textContent = 'Start Recording';
-  recordingStatus.textContent = '';
-}
-
-// Vosk integration
-let useVosk = false;
-let voskLoaded = false;
-
-// Try to load Vosk if available
-async function tryLoadVosk() {
-  try {
-    const { loadVosk } = await import('./vosk-integration.js');
-    await loadVosk();
-    voskLoaded = true;
-    statusBar.textContent = 'Vosk speech recognition ready (offline)';
-  } catch (e) {
-    voskLoaded = false;
-    statusBar.textContent = 'Vosk not available: ' + e.message;
-  }
-}
-
-// Add a toggle for Vosk (offline) vs Web Speech API (online)
-const voskToggle = document.createElement('button');
-voskToggle.id = 'voskToggleBtn';
-voskToggle.textContent = 'Use Offline Speech (Vosk)';
-voskToggle.title = 'Toggle between offline (Vosk) and online (Web Speech API) speech recognition';
-voskToggle.style.marginRight = '8px';
-voskToggle.addEventListener('click', async () => {
-  useVosk = !useVosk;
-  voskToggle.textContent = useVosk ? 'Use Online Speech (Web Speech API)' : 'Use Offline Speech (Vosk)';
-  if (useVosk && !voskLoaded) await tryLoadVosk();
-  statusBar.textContent = useVosk ? 'Vosk (offline) mode enabled' : 'Web Speech API (online) mode enabled';
-});
-if (transcriptSection) {
-  transcriptSection.insertBefore(voskToggle, transcriptSection.querySelector('#copyTranscriptBtn'));
-}
-
-let voskStopFn = null;
-
-async function startVoskRecognitionWrapper() {
-  const { startVoskRecognition, stopVoskRecognition } = await import('./vosk-integration.js');
-  transcriptText = '';
-  await startVoskRecognition((text, isFinal) => {
-    if (isFinal) {
-      transcriptText += text + ' ';
+async function startTranscription(overlap = false) {
+  if (!isRecording) return;
+  transcriptText = transcriptArea.value || '';
+  const dedupeAppend = (text) => {
+    // Only append if not duplicate of last 20 chars
+    if (!transcriptText.endsWith(text)) {
+      transcriptText += text;
       transcriptArea.value = transcriptText;
-    } else {
-      transcriptArea.value = transcriptText + text;
     }
-    transcriptArea.dispatchEvent(new Event('input'));
-  });
-  voskStopFn = stopVoskRecognition;
-  recordingStatus.textContent = 'Recording (offline)...';
-  statusBar.textContent = 'Listening (Vosk offline)';
+  };
+
+  if (!modeSwitch.checked) {
+    // Offline
+    try {
+      await loadVosk();
+      await startVoskRecognition((text, isFinal) => {
+        if (isFinal) {
+          dedupeAppend(text + ' ');
+        } else {
+          transcriptArea.value = transcriptText + text;
+        }
+        transcriptArea.dispatchEvent(new Event('input'));
+      });
+      recordingStatus.textContent = 'Recording...';
+      statusBar.textContent = 'Transcribing offline...';
+      if (overlap) {
+        pendingRecognizer = 'offline';
+        setTimeout(() => {
+          if (activeRecognizer === 'online') stopWebSpeechRecognition();
+          activeRecognizer = 'offline';
+          pendingRecognizer = null;
+        }, 5000); // 5 seconds overlap
+      } else {
+        activeRecognizer = 'offline';
+      }
+    } catch (err) {
+      modeSwitch.checked = true;
+      statusBar.textContent = 'Offline mode failed, switched to Online.';
+      startTranscription();
+    }
+  } else {
+    // Online
+    try {
+      startWebSpeechRecognition({
+        transcriptArea,
+        recordingStatus,
+        statusBar,
+        transcriptText,
+        onResult: (text, isFinal) => {
+          if (isFinal) {
+            dedupeAppend(text);
+          } else {
+            transcriptArea.value = text;
+          }
+          transcriptArea.dispatchEvent(new Event('input'));
+        },
+        onError: (event) => {
+          if (event.error === 'network' || event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            stopRecording();
+            modeSwitch.checked = false;
+            statusBar.textContent = 'Network error, switching to offline mode...';
+            isRecording = true;
+            recordBtn.textContent = 'Stop Recording';
+            startTranscription();
+            return;
+          }
+          statusBar.textContent = 'Speech recognition error: ' + event.error;
+          stopRecording();
+        },
+        onEnd: (reason) => {
+          if (reason === 'stopped') {
+            isRecording = false;
+            recordBtn.textContent = 'Start Recording';
+            recordingStatus.textContent = '';
+            statusBar.textContent = 'Ready.';
+            return;
+          }
+          recordingStatus.textContent = '';
+          statusBar.textContent = 'Stopped.';
+          isRecording = false;
+          recordBtn.textContent = 'Start Recording';
+        }
+      });
+      recordingStatus.textContent = 'Recording...';
+      statusBar.textContent = 'Transcribing online...';
+      if (overlap) {
+        pendingRecognizer = 'online';
+        setTimeout(() => {
+          if (activeRecognizer === 'offline') stopVoskRecognition();
+          activeRecognizer = 'online';
+          pendingRecognizer = null;
+        }, 5000); // 5 seconds overlap
+      } else {
+        activeRecognizer = 'online';
+      }
+    } catch (err) {
+      modeSwitch.checked = false;
+      statusBar.textContent = 'Online mode failed, switched to Offline.';
+      startTranscription();
+    }
+  }
 }
 
-// Update recordBtn event to support Vosk
+// Toggle handler: switch mode instantly if recording, with overlap
+modeSwitch.addEventListener('change', async () => {
+  if (isRecording) {
+    // Start new recognizer before stopping the old one
+    await startTranscription(true); // overlap=true
+    // Old recognizer will be stopped after 5s overlap
+  }
+});
+
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    if (useVosk && voskStopFn) voskStopFn();
-    else stopRecording();
-    isRecording = false;
-    recordBtn.textContent = 'Start Recording';
-    recordingStatus.textContent = '';
+    await stopRecording();
     return;
   }
-  if (useVosk) {
-    isRecording = true;
-    recordBtn.textContent = 'Stop Recording';
-    await startVoskRecognitionWrapper();
-  } else {
-    if (supportsWebSpeechAPI() && navigator.onLine) {
-      isRecording = true;
-      recordBtn.textContent = 'Stop Recording';
-      startWebSpeechRecognition();
-    } else {
-      statusBar.textContent = 'Web Speech API not supported or offline.';
-    }
-  }
+  isRecording = true;
+  recordBtn.textContent = 'Stop Recording';
+  transcriptText = transcriptArea.value || '';
+  await startTranscription();
 });
+
+// --- Upload Audio Button (Vosk default) ---
+const uploadAudioBtn = document.createElement('button');
+uploadAudioBtn.id = 'uploadAudioBtn';
+uploadAudioBtn.textContent = 'Upload Audio';
+uploadAudioBtn.title = 'Upload an audio file to transcribe';
+uploadAudioBtn.className = 'main-action';
+if (transcriptSection) {
+  transcriptSection.insertBefore(uploadAudioBtn, transcriptSection.querySelector('#copyTranscriptBtn'));
+}
+
+uploadAudioBtn.addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      transcriptText = await transcribeAudioFileWithVosk(file, transcriptArea, statusBar);
+    }
+  };
+  input.click();
+});
+
+// Remove the transcribe online button if it exists
+const transcribeOnlineBtn = document.getElementById('transcribeOnlineBtn');
+if (transcribeOnlineBtn) transcribeOnlineBtn.remove();
 
 // Scroll transcript to bottom as new text is added
 if (transcriptArea) {
@@ -189,48 +186,139 @@ if (copyTranscriptBtn) {
     statusBar.textContent = 'Transcript copied!';
   });
 }
-// Copy summary
-if (copySummaryBtn) {
-  copySummaryBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(summary.textContent || summary.innerText);
-    statusBar.textContent = 'Summary copied!';
+
+// --- History Save/Load Logic ---
+function saveNoteToHistory({ title, transcript, summary }) {
+  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
+  notes.unshift({
+    title: title || `Note ${new Date().toLocaleString()}`,
+    transcript,
+    summary,
+    timestamp: Date.now()
   });
+  localStorage.setItem('voiceNotesHistory', JSON.stringify(notes));
+  renderHistory();
 }
-// Clear history
-if (clearHistoryBtn) {
-  clearHistoryBtn.addEventListener('click', async () => {
-    const db = await openDB();
-    const tx = db.transaction('history', 'readwrite');
-    tx.objectStore('history').clear();
-    tx.oncomplete = () => {
-      db.close();
-      renderHistory();
-      statusBar.textContent = 'History cleared.';
-    };
+
+function renderHistory() {
+  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
+  historyList.innerHTML = '';
+  notes.forEach((note, idx) => {
+    const li = document.createElement('li');
+    li.className = 'history-dropdown';
+    li.innerHTML = `
+      <div class="history-title-row">
+        <button class="history-title-btn" data-idx="${idx}">
+          <span class="history-title-text">${note.title || 'Untitled'}</span>
+        </button>
+        <div class="history-actions-inline">
+          <button class="export-note-btn" title="Copy Transcript" data-idx="${idx}">📋</button>
+          <button class="delete-note-btn" title="Delete Note" data-idx="${idx}">🗑️</button>
+        </div>
+      </div>
+      <div class="history-details" style="display:none;"></div>
+    `;
+    historyList.appendChild(li);
   });
 }
 
-// Add clear all logic to the hr line
-const clearHistoryHr = document.querySelector('.clear-history-hr');
-if (clearHistoryHr) {
-  clearHistoryHr.style.cursor = 'pointer';
-  clearHistoryHr.title = 'Clear all history';
-  clearHistoryHr.addEventListener('click', async () => {
-    if (confirm('Clear all history?')) {
-      const db = await openDB();
-      const tx = db.transaction('history', 'readwrite');
-      tx.objectStore('history').clear();
-      tx.oncomplete = () => {
-        db.close();
-        renderHistory();
-        statusBar.textContent = 'History cleared.';
-      };
+// Expand/collapse and actions
+historyList.addEventListener('click', (e) => {
+  const btn = e.target.closest('.history-title-btn');
+  const copyBtn = e.target.closest('.export-note-btn');
+  const delBtn = e.target.closest('.delete-note-btn');
+  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
+  if (btn) {
+    const idx = btn.dataset.idx;
+    const li = btn.closest('li');
+    const details = li.querySelector('.history-details');
+    if (details.style.display === 'none') {
+      const note = notes[idx];
+      details.innerHTML = `<b>Transcript:</b><br><pre>${note.transcript}</pre><b>Summary:</b><br><pre>${note.summary || ''}</pre>`;
+      details.style.display = 'block';
+    } else {
+      details.style.display = 'none';
     }
-  });
+  } else if (copyBtn) {
+    const idx = copyBtn.dataset.idx;
+    navigator.clipboard.writeText(notes[idx].transcript + '\n\n' + (notes[idx].summary || ''));
+    statusBar.textContent = 'Note copied!';
+  } else if (delBtn) {
+    const idx = delBtn.dataset.idx;
+    notes.splice(idx, 1);
+    localStorage.setItem('voiceNotesHistory', JSON.stringify(notes));
+    renderHistory();
+    statusBar.textContent = 'Note deleted.';
+  }
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  statusBar.textContent = 'Ready.';
+  renderHistory();
+});
+
+// On page load, initialize
+window.addEventListener('DOMContentLoaded', () => {
+  statusBar.textContent = 'Ready.';
+});
+
+// Listen for browser offline event to auto-switch to offline mode if recording online
+window.addEventListener('offline', () => {
+  if (isRecording && modeSwitch.checked) { // Only if in online mode
+    stopRecording();
+    modeSwitch.checked = false;
+    statusBar.textContent = 'Internet lost, switching to offline mode...';
+    isRecording = true;
+    recordBtn.textContent = 'Stop Recording';
+    startTranscription();
+  }
+});
+
+async function stopRecording() {
+  // Stop offline (Vosk) recognition
+  if (typeof stopVoskRecognition === 'function') {
+    await stopVoskRecognition();
+  }
+  // Stop online (Web Speech API) recognition
+  if (typeof stopWebSpeechRecognition === 'function') {
+    stopWebSpeechRecognition();
+  }
+  // Stop microphone stream if active
+  if (window.voskMicStream && typeof window.voskMicStream.getTracks === 'function') {
+    window.voskMicStream.getTracks().forEach(track => track.stop());
+    window.voskMicStream = null;
+  }
+  isRecording = false;
+  recordBtn.textContent = 'Start Recording';
+  recordingStatus.textContent = '';
+  statusBar.textContent = 'Ready.';
 }
 
-// --- Feature 3: Send Transcript to Backend (Gemini API via Cloudflare Worker) ---
+// --- Implement transcribeAudioFileWithVosk for upload ---
+async function transcribeAudioFileWithVosk(file, transcriptArea, statusBar) {
+  await loadVosk();
+  statusBar.textContent = 'Transcribing offline...';
+  const arrayBuffer = await file.arrayBuffer();
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+  const pcm = audioBuffer.getChannelData(0);
+  const int16 = new Int16Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) {
+    int16[i] = Math.max(-32768, Math.min(32767, pcm[i] * 32767));
+  }
+  const recognizer = new Vosk.Recognizer(voskModel, audioBuffer.sampleRate);
+  recognizer.acceptWaveform(int16);
+  const res = recognizer.finalResult();
+  recognizer.free();
+  audioCtx.close();
+  const text = res.text || '';
+  transcriptArea.value = text;
+  transcriptArea.dispatchEvent(new Event('input'));
+  statusBar.textContent = 'Offline transcription complete.';
+  return text;
+}
 
+// --- Fix summarize button logic and error handling ---
 sendToLLMBtn.addEventListener('click', async () => {
   const transcript = transcriptArea.value.trim();
   if (!transcript) {
@@ -240,400 +328,32 @@ sendToLLMBtn.addEventListener('click', async () => {
   statusBar.textContent = 'Sending transcript to backend for summarization...';
   sendToLLMBtn.disabled = true;
   try {
-    // Use your deployed Cloudflare Worker endpoint
     const endpoint = 'https://llm.melbinjpaulose.workers.dev/';
-    // Send all options for maximum compatibility with the worker
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: transcript, // worker expects 'text' (or 'transcript')
-        summaryLength: 'default', // always use 'default'
-        summaryType: 'standard', // always use 'standard'
-        language: 'English',
-        title: sessionTitleInput.value.trim() || undefined
-      })
+      body: JSON.stringify({ text: transcript })
     });
     if (!res.ok) throw new Error('Backend error: ' + res.status);
     const data = await res.json();
-    // --- Session title logic ---
-    let sessionTitle = sessionTitleInput.value.trim();
-    if (!sessionTitle) {
-      // Use timestamp as default
-      const now = new Date();
-      sessionTitle = now.toLocaleString();
-      // If summary exists, try to use first sentence as title
-      if (data.summary) {
-        const firstSentence = data.summary.split(/[.!?]/)[0].trim();
-        if (firstSentence && firstSentence.length > 5) {
-          sessionTitle = firstSentence;
-        }
-      }
-      sessionTitleInput.value = sessionTitle;
-    }
     let html = '';
-    if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
-    if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
     if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
     const points = data.keyPoints || data.bullets;
     if (points && Array.isArray(points)) {
       html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
     }
     summary.innerHTML = html;
-    statusBar.textContent = 'Summary received.';
-    saveToHistory(transcript, data.summary, points, sessionTitle);
-    renderHistory();
+    lastSummary = data.summary || '';
+    // Save to history
+    saveNoteToHistory({
+      title: sessionTitleInput.value,
+      transcript: transcriptArea.value,
+      summary: lastSummary
+    });
+    statusBar.textContent = 'Summary received and note saved.';
   } catch (e) {
     summary.innerHTML = '';
     statusBar.textContent = 'Error: ' + e.message;
   }
   sendToLLMBtn.disabled = false;
 });
-
-// --- Feature 4: IndexedDB Storage for History ---
-// Simple IndexedDB wrapper
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('voiceNotesDB', 1);
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains('history')) {
-        db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function saveToHistory(transcript, summary, keyPoints, title) {
-  const db = await openDB();
-  const tx = db.transaction('history', 'readwrite');
-  const store = tx.objectStore('history');
-  await store.add({
-    date: new Date().toISOString(),
-    transcript,
-    summary,
-    keyPoints,
-    title
-  });
-  tx.oncomplete = () => db.close();
-}
-
-async function loadHistory() {
-  const db = await openDB();
-  const tx = db.transaction('history', 'readonly');
-  const store = tx.objectStore('history');
-  const req = store.getAll();
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => {
-      db.close();
-      resolve(req.result.sort((a, b) => b.date.localeCompare(a.date)));
-    };
-    req.onerror = () => {
-      db.close();
-      reject(req.error);
-    };
-  });
-}
-
-// --- Show history in the UI with per-note export, delete, and dropdown expansion ---
-async function renderHistory() {
-  const list = document.getElementById('historyList');
-  if (!list) return;
-  const items = await loadHistory();
-  list.innerHTML = items.map((item, idx) => {
-    const safeTitle = item.title ? item.title.replace(/</g, '&lt;').replace(/>/g, '&gt;') : 'Untitled';
-    const transcript = item.transcript ? item.transcript.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
-    const summary = item.summary ? item.summary.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
-    const keyPoints = item.keyPoints && Array.isArray(item.keyPoints) && item.keyPoints.length
-      ? '<ul>' + item.keyPoints.map(pt => `<li>${pt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('') + '</ul>'
-      : '';
-    return `
-      <li data-id="${item.id}" class="history-dropdown">
-        <div class="history-title-row">
-          <button class="history-title-btn" aria-expanded="false" aria-controls="history-details-${item.id}">
-            <span class="history-arrow" aria-hidden="true">▶</span>
-            <span class="sidebar-session-label history-title-text" title="${safeTitle}">${safeTitle}</span>
-          </button>
-          <div class="history-actions-inline">
-            <button class="export-note-btn" data-id="${item.id}" title="Export" aria-label="Export">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m0 0l-6-6m6 6l6-6"/></svg>
-            </button>
-            <button class="delete-note-btn" data-id="${item.id}" title="Delete" aria-label="Delete">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-            </button>
-          </div>
-        </div>
-        <div class="history-details" id="history-details-${item.id}" hidden>
-          <div class="history-meta"><b>Date:</b> ${new Date(item.date).toLocaleString()}</div>
-          <div class="history-transcript"><b>Transcript:</b><br>${transcript}</div>
-          <div class="history-summary"><b>Summary:</b><br>${summary}</div>
-          ${keyPoints ? `<div class="history-keypoints"><b>Key Points:</b>${keyPoints}</div>` : ''}
-          <div class="history-actions-expanded">
-            <button class="export-note-btn" data-id="${item.id}" title="Export" aria-label="Export">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m0 0l-6-6m6 6l6-6"/></svg>
-            </button>
-            <button class="delete-note-btn" data-id="${item.id}" title="Delete" aria-label="Delete">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-            </button>
-          </div>
-        </div>
-      </li>
-    `;
-  }).join('');
-
-  // Dropdown expand/collapse logic with arrow
-  list.querySelectorAll('.history-title-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-      const details = btn.parentElement.parentElement.querySelector('.history-details');
-      const arrow = btn.querySelector('.history-arrow');
-      const expanded = btn.getAttribute('aria-expanded') === 'true';
-      btn.setAttribute('aria-expanded', !expanded);
-      if (expanded) {
-        details.hidden = true;
-        if (arrow) arrow.textContent = '▶';
-      } else {
-        details.hidden = false;
-        if (arrow) arrow.textContent = '▼';
-      }
-    });
-  });
-
-  // Export (download) logic
-  list.querySelectorAll('.export-note-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const id = Number(btn.getAttribute('data-id'));
-      const note = (await loadHistory()).find(n => n.id === id);
-      if (!note) return;
-      const content =
-        `${note.title ? 'Title: ' + note.title + '\n' : ''}` +
-        `Date: ${new Date(note.date).toLocaleString()}\n` +
-        `Transcript:\n${note.transcript}\n\nSummary:\n${note.summary}\n` +
-        (note.keyPoints && note.keyPoints.length ? `\nKey Points:\n- ${note.keyPoints.join('\n- ')}` : '');
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = (note.title ? note.title.replace(/[^a-z0-9]/gi, '_') : 'note') + '.txt';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-    });
-  });
-
-  // Delete logic
-  list.querySelectorAll('.delete-note-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const id = Number(btn.getAttribute('data-id'));
-      const db = await openDB();
-      const tx = db.transaction('history', 'readwrite');
-      tx.objectStore('history').delete(id);
-      tx.oncomplete = () => {
-        db.close();
-        renderHistory();
-        statusBar.textContent = 'Note deleted.';
-      };
-    });
-  });
-}
-
-// --- Clear All History Button ---
-function ensureClearAllBtn() {
-  let clearBtn = document.getElementById('clearHistoryBtn');
-  if (!clearBtn) {
-    clearBtn = document.createElement('button');
-    clearBtn.id = 'clearHistoryBtn';
-    clearBtn.textContent = 'Clear All';
-    clearBtn.title = 'Clear all history';
-    clearBtn.style.margin = '8px 0 8px 16px';
-    clearBtn.style.background = '#fff';
-    clearBtn.style.color = '#d32f2f';
-    clearBtn.style.border = '1.5px solid #d32f2f';
-    clearBtn.style.borderRadius = '18px';
-    clearBtn.style.fontSize = '1rem';
-    clearBtn.style.fontWeight = '500';
-    clearBtn.style.padding = '7px 18px';
-    clearBtn.style.cursor = 'pointer';
-    clearBtn.addEventListener('click', async () => {
-      if (confirm('Clear all history?')) {
-        const db = await openDB();
-        const tx = db.transaction('history', 'readwrite');
-        tx.objectStore('history').clear();
-        tx.oncomplete = () => {
-          db.close();
-          renderHistory();
-          statusBar.textContent = 'History cleared.';
-        };
-      }
-    });
-    // Insert at the top of the history section
-    const historySection = document.querySelector('.history-section-bottom');
-    if (historySection && !document.getElementById('clearHistoryBtn')) {
-      historySection.insertBefore(clearBtn, historySection.firstChild);
-    }
-  }
-}
-
-// Ensure clear all button is present after rendering history
-window.addEventListener('DOMContentLoaded', ensureClearAllBtn);
-const origRenderHistory = renderHistory;
-renderHistory = async function() {
-  await origRenderHistory.apply(this, arguments);
-  ensureClearAllBtn();
-};
-
-// --- Feature 6: PWA Install Prompt ---
-let deferredPrompt = null;
-
-// Create and insert the install button
-const installBtn = document.createElement('button');
-installBtn.id = 'installBtn';
-installBtn.textContent = 'Install App';
-installBtn.style.display = 'none';
-installBtn.style.margin = '10px auto';
-installBtn.style.padding = '10px 20px';
-installBtn.style.fontSize = '1rem';
-installBtn.style.cursor = 'pointer';
-
-// Insert the button into the DOM (e.g., after the statusBar)
-window.addEventListener('DOMContentLoaded', () => {
-  const statusBar = document.getElementById('statusBar');
-  if (statusBar && !document.getElementById('installBtn')) {
-    statusBar.parentNode.insertBefore(installBtn, statusBar.nextSibling);
-  }
-  renderHistory();
-});
-
-// Sidebar toggle logic
-const sidebarToggle = document.getElementById('sidebarToggle');
-const sidebar = document.getElementById('sidebar');
-const appMain = document.getElementById('app');
-
-function setHamburgerState(open) {
-  if (open) {
-    sidebarToggle.classList.add('open');
-    sidebarToggle.setAttribute('aria-label', 'Hide sidebar');
-  } else {
-    sidebarToggle.classList.remove('open');
-    sidebarToggle.setAttribute('aria-label', 'Show sidebar');
-  }
-}
-
-function closeSidebar() {
-  sidebar.classList.remove('open');
-  appMain.classList.remove('with-sidebar');
-  setHamburgerState(false);
-}
-function openSidebar() {
-  sidebar.classList.add('open');
-  appMain.classList.add('with-sidebar');
-  setHamburgerState(true);
-}
-if (sidebarToggle && sidebar && appMain) {
-  sidebarToggle.addEventListener('click', () => {
-    if (sidebar.classList.contains('open')) {
-      closeSidebar();
-    } else {
-      openSidebar();
-    }
-  });
-  // Close sidebar on click outside (desktop and mobile)
-  window.addEventListener('click', (e) => {
-    if (sidebar.classList.contains('open')) {
-      if (!sidebar.contains(e.target) && !sidebarToggle.contains(e.target)) {
-        closeSidebar();
-      }
-    }
-  });
-  // Close sidebar on Escape key
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sidebar.classList.contains('open')) {
-      closeSidebar();
-    }
-  });
-}
-window.addEventListener('DOMContentLoaded', () => {
-  closeSidebar();
-});
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'block';
-});
-
-installBtn.addEventListener('click', async () => {
-  if (!deferredPrompt) return;
-  installBtn.disabled = true;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') {
-    statusBar.textContent = 'App installed!';
-  } else {
-    statusBar.textContent = 'Install dismissed.';
-  }
-  installBtn.style.display = 'none';
-  deferredPrompt = null;
-  installBtn.disabled = false;
-});
-
-// --- Service Worker update notification logic ---
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('service-worker.js').then(reg => {
-    // Listen for updates
-    reg.addEventListener('updatefound', () => {
-      const newWorker = reg.installing;
-      if (newWorker) {
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            showUpdateBanner(newWorker, reg);
-          }
-        });
-      }
-    });
-    // Also check if there's already a waiting SW
-    if (reg.waiting) {
-      showUpdateBanner(reg.waiting, reg);
-    }
-  });
-}
-
-function showUpdateBanner(worker, reg) {
-  const banner = document.getElementById('updateBanner');
-  if (!banner) return;
-  banner.style.display = 'block';
-  banner.onclick = () => {
-    worker.postMessage({ action: 'skipWaiting' });
-    banner.textContent = 'Updating...';
-    setTimeout(() => {
-      window.location.reload();
-    }, 800);
-  };
-}
-// Listen for controllerchange to reload after update
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    window.location.reload();
-  });
-}
-
-// On page load, show history
-window.addEventListener('DOMContentLoaded', renderHistory);
-
-// This file will handle:
-// - Audio recording (MediaRecorder)
-// - Online transcription (Web Speech API)
-// - UI updates
-// - Sending to backend
-// - IndexedDB storage
-// - PWA install prompt
-// - Sidebar toggle logic
-// - Service Worker update notification logic
-
-// We'll implement each feature in order.

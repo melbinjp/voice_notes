@@ -6,7 +6,23 @@ const urlsToCache = [
   '/style.css',
   '/app.js',
   '/manifest.json',
-  // Add vosk model files here later
+  '/vosk.js',
+  '/vosk-integration.js',
+  // Explicitly cache all model files for offline use
+  './vosk-model-small-en-us-0.15/README',
+  './vosk-model-small-en-us-0.15/am/final.mdl',
+  './vosk-model-small-en-us-0.15/conf/mfcc.conf',
+  './vosk-model-small-en-us-0.15/conf/model.conf',
+  './vosk-model-small-en-us-0.15/graph/disambig_tid.int',
+  './vosk-model-small-en-us-0.15/graph/Gr.fst',
+  './vosk-model-small-en-us-0.15/graph/HCLr.fst',
+  './vosk-model-small-en-us-0.15/graph/phones/word_boundary.int',
+  './vosk-model-small-en-us-0.15/ivector/final.dubm',
+  './vosk-model-small-en-us-0.15/ivector/final.ie',
+  './vosk-model-small-en-us-0.15/ivector/final.mat',
+  './vosk-model-small-en-us-0.15/ivector/global_cmvn.stats',
+  './vosk-model-small-en-us-0.15/ivector/online_cmvn.conf',
+  './vosk-model-small-en-us-0.15/ivector/splice.conf'
 ];
 
 self.addEventListener('install', event => {
@@ -23,20 +39,33 @@ self.addEventListener('fetch', event => {
           (event.request.method === 'GET' && event.request.headers.get('accept')?.includes('text/html'))) {
         return fetch(event.request)
           .then(networkResponse => {
-            // Update cache with latest HTML
+            // Clone the response for cache and for return
+            const responseClone = networkResponse.clone();
             caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, networkResponse.clone());
+              cache.put(event.request, responseClone);
             });
             return networkResponse;
           })
           .catch(() => response || caches.match('/index.html'));
       }
+      // For app.js and index.html, always try to update cache in background (cache-busting)
+      if (event.request.url.endsWith('app.js') || event.request.url.endsWith('index.html')) {
+        return fetch(event.request)
+          .then(networkResponse => {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, responseClone);
+            });
+            return networkResponse;
+          })
+          .catch(() => response);
+      }
       // For other requests, use cache first, then network
       return response || fetch(event.request).then(networkResponse => {
-        // Optionally update cache for other assets
         if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, networkResponse.clone());
+            cache.put(event.request, responseClone);
           });
         }
         return networkResponse;

@@ -14,8 +14,14 @@
   <div id="app">
     <h1>Voice Notes</h1>
     <div class="recorder-controls">
-      <button id="recordBtn">Start Recording</button>
+      <button id="recordBtn" class="main-action">Start Recording</button>
       <span id="recordingStatus"></span>
+      <div class="switch-container">
+        <span class="switch-label">Offline</span>
+        <input type="checkbox" id="modeSwitch" class="switch-input" />
+        <label for="modeSwitch" class="switch-slider"></label>
+        <span class="switch-label">Online</span>
+      </div>
     </div>
     <div class="session-title-section">
       <input id="sessionTitle" type="text" placeholder="Session Title (optional)" maxlength="100" />
@@ -41,6 +47,7 @@
   <div id="updateBanner" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(25,118,210,0.10);">
     A new version is available. Click to update.
   </div>
-  <script src="app.js"></script>
+  <script src="vosk.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

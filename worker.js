@@ -44,7 +44,7 @@ export default {
       }
 
       // Prepend instruction to text
-      const input_text = `${instruction}\n${text}`;
+      const input_text = `Correct all spelling and grammar mistakes, then summarize the following as clearly as possible:\n${instruction}\n${text}`;
 
       // Call the BART summarization model
       const result = await env.AI.run('@cf/facebook/bart-large-cnn', {
