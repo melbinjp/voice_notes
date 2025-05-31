@@ -35,11 +35,21 @@ async function initVoskWorklet() {
     await voskAudioContext.audioWorklet.addModule(url);
     voskAudioContext.audioWorklet.workletAdded = true;
   }
-  voskMicSource = voskAudioContext.createMediaStreamSource(
-    window.voskMicStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } })
-  );
+  const micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+  voskMicSource = voskAudioContext.createMediaStreamSource(micStream);
   voskWorkletNode = new AudioWorkletNode(voskAudioContext, 'vosk-processor');
   voskMicSource.connect(voskWorkletNode);
+  // Set up port.onmessage ONCE
+  voskWorkletNode.port.onmessage = (e) => {
+    if (!voskRecognizer) return;
+    let input = e.data;
+    if (!(input instanceof Float32Array)) input = new Float32Array(input);
+    try {
+      voskRecognizer.acceptWaveformFloat(input, 16000);
+    } catch (err) {
+      console.error('Error processing audio:', err);
+    }
+  };
   // Do NOT connect to destination yet
 }
 
@@ -59,17 +69,11 @@ async function startVoskRecognition(onResult) {
   voskRecognizer.on('result', ({ result }) => {
     if (result && result.text && voskOnResult) voskOnResult(result.text, true);
   });
-  voskWorkletNode.port.onmessage = (e) => {
-    if (!voskRecognizer) return;
-    let input = e.data;
-    if (!(input instanceof Float32Array)) input = new Float32Array(input);
-    try {
-      voskRecognizer.acceptWaveformFloat(input, 16000);
-    } catch (err) {
-      console.error('Error processing audio:', err);
-    }
-  };
-  voskWorkletNode.connect(voskAudioContext.destination);
+  // Only connect if not already connected
+  if (voskAudioContext && voskWorkletNode && !voskWorkletNode.connected) {
+    voskWorkletNode.connect(voskAudioContext.destination);
+    voskWorkletNode.connected = true;
+  }
 }
 
 function stopVoskRecognition() {
@@ -78,12 +82,22 @@ function stopVoskRecognition() {
     voskRecognizer = null;
   }
   // Only disconnect if actually connected
-  if (voskWorkletNode && voskAudioContext) {
+  if (voskWorkletNode && voskAudioContext && voskWorkletNode.connected) {
     try {
       voskWorkletNode.disconnect(voskAudioContext.destination);
+      voskWorkletNode.connected = false;
     } catch (e) {
       // Ignore if already disconnected
     }
+  }
+  // Release mic and audio context
+  if (voskMicSource && voskMicSource.mediaStream) {
+    voskMicSource.mediaStream.getTracks().forEach(track => track.stop());
+    voskMicSource = null;
+  }
+  if (voskAudioContext && voskAudioContext.state !== 'closed') {
+    voskAudioContext.close();
+    voskAudioContext = null;
   }
   voskOnResult = null;
 }

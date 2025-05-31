@@ -17,29 +17,257 @@ let isRecording = false;
 let transcriptText = '';
 let lastSummary = '';
 
-// Helper to start the correct mode, with overlap support
-let overlapTimeout = null;
+// Helper to start the correct mode
 let activeRecognizer = null; // 'online' or 'offline'
 let pendingRecognizer = null; // 'online' or 'offline'
+
+// Helper to compare if two texts are similar (by words, ignoring case and punctuation)
+function areTranscriptsSimilar(a, b) {
+  if (!a || !b) return false;
+  const clean = s => s.trim().replace(/[^\w\s]/g, '').toLowerCase();
+  const aWords = clean(a).split(/\s+/).slice(-10).join(' ');
+  const bWords = clean(b).split(/\s+/).slice(0, 10).join(' ');
+  return aWords && bWords && aWords === bWords;
+}
+
+// Helper to compare if two texts have at least 2-5 similar words (for overlap switching)
+function areTranscriptsSimilarFewWords(a, b) {
+  if (!a || !b) return false;
+  const clean = s => s.trim().replace(/[^\w\s]/g, '').toLowerCase();
+  const aWords = clean(a).split(/\s+/);
+  const bWords = clean(b).split(/\s+/);
+  let matchCount = 0;
+  for (let i = 0; i < Math.min(5, aWords.length, bWords.length); i++) {
+    if (aWords[aWords.length - 1 - i] === bWords[i]) matchCount++;
+    else break;
+  }
+  return matchCount >= 2; // 2 to 5 similar words
+}
+
+// Deduplication: only dedupe if the new text's first 30 characters overlap with the end of the current transcript
+// Always add a space before appending new model's transcript after switch
+function dedupeAppendWithSpace(text, isSwitch) {
+  if (!text) return;
+  if (isSwitch && transcriptText && !transcriptText.endsWith(' ')) transcriptText += ' ';
+  // Check for overlap in the last 30 characters
+  const overlapWindow = 30;
+  const endOfTranscript = transcriptText.slice(-overlapWindow);
+  const startOfText = text.slice(0, overlapWindow);
+  if (endOfTranscript && startOfText && endOfTranscript.includes(startOfText.trim())) {
+    let deduped = text;
+    for (let i = overlapWindow; i > 0; i--) {
+      if (endOfTranscript.endsWith(text.slice(0, i))) {
+        deduped = text.slice(i);
+        break;
+      }
+    }
+    transcriptText += deduped;
+  } else {
+    transcriptText += text;
+  }
+  transcriptArea.value = transcriptText;
+}
+
+// Unified overlap switch handler for both directions (improved symmetry and handler signatures)
+async function handleRecognizerOverlap({
+  prevType, newType, startPrev, stopPrev, startNew, stopNew, dedupeAppend, transcriptArea, recordingStatus, statusBar
+}) {
+  let switchPending = false;
+  let lastPrevModelText = '';
+  let lastNewModelText = '';
+  let prevModelStopped = false;
+  let newModelStarted = false;
+  let newModelTranscript = '';
+
+  // Handler for previous recognizer
+  let prevHandler;
+  if (prevType === 'online') {
+    prevHandler = {
+      transcriptArea,
+      recordingStatus,
+      statusBar,
+      transcriptText,
+      onResult: (text, isFinal) => {
+        if (isFinal) {
+          dedupeAppend(text + ' ', false);
+          lastPrevModelText = text;
+        } else {
+          transcriptArea.value = transcriptText + text;
+        }
+        transcriptArea.dispatchEvent(new Event('input'));
+      },
+      onError: () => {},
+      onEnd: () => {}
+    };
+  } else {
+    prevHandler = (text, isFinal) => {
+      if (isFinal) {
+        dedupeAppend(text + ' ', false);
+        lastPrevModelText = text;
+      } else {
+        transcriptArea.value = transcriptText + text;
+      }
+      transcriptArea.dispatchEvent(new Event('input'));
+    };
+  }
+
+  // Handler for new recognizer (object for webspeech, callback for vosk)
+  let newHandler;
+  if (newType === 'online') {
+    newHandler = {
+      transcriptArea,
+      recordingStatus,
+      statusBar,
+      transcriptText,
+      onResult: (text, isFinal) => {
+        if (!newModelStarted && isFinal) newModelStarted = true;
+        if (isFinal) {
+          dedupeAppend(text, switchPending);
+          lastNewModelText = text;
+          newModelTranscript += text;
+          if (!switchPending && areTranscriptsSimilarFewWords(lastPrevModelText, lastNewModelText)) {
+            switchPending = true;
+            setTimeout(() => {
+              if (!prevModelStopped) {
+                stopPrev();
+                activeRecognizer = newType;
+                pendingRecognizer = null;
+                prevModelStopped = true;
+                if (transcriptText && !transcriptText.endsWith(' ')) transcriptText += ' ';
+              }
+            }, 3000);
+          }
+        }
+      },
+      onError: (event) => {},
+      onEnd: () => {
+        if (pendingRecognizer === prevType && isRecording) {
+          stopPrev();
+          activeRecognizer = newType;
+          pendingRecognizer = null;
+          recordingStatus.textContent = 'Recording...';
+          statusBar.textContent = `Transcribing ${newType}...`;
+          if (!window.recognition || window.recognition.state !== 'running') {
+            startNew(newHandler);
+          }
+        }
+      }
+    };
+  } else {
+    newHandler = (text, isFinal) => {
+      if (!newModelStarted && isFinal) newModelStarted = true;
+      if (isFinal) {
+        dedupeAppend(text, switchPending);
+        lastNewModelText = text;
+        newModelTranscript += text;
+        if (!switchPending && areTranscriptsSimilarFewWords(lastPrevModelText, lastNewModelText)) {
+          switchPending = true;
+          setTimeout(() => {
+            if (!prevModelStopped) {
+              stopPrev();
+              activeRecognizer = newType;
+              pendingRecognizer = null;
+              prevModelStopped = true;
+              if (transcriptText && !transcriptText.endsWith(' ')) transcriptText += ' ';
+            }
+          }, 3000);
+        }
+      } else {
+        transcriptArea.value = transcriptText + text;
+      }
+      transcriptArea.dispatchEvent(new Event('input'));
+    };
+  }
+
+  // Start previous recognizer
+  if (prevType === 'online') {
+    startPrev(prevHandler);
+  } else {
+    await startPrev(prevHandler);
+  }
+  recordingStatus.textContent = 'Recording...';
+  statusBar.textContent = `Transcribing ${prevType}...`;
+  pendingRecognizer = prevType;
+
+  // Start new recognizer in parallel
+  if (newType === 'online') {
+    startNew(newHandler);
+  } else {
+    await startNew(newHandler);
+  }
+
+  setTimeout(() => {
+    if (!switchPending) {
+      stopPrev();
+      activeRecognizer = newType;
+      pendingRecognizer = null;
+      prevModelStopped = true;
+      if (transcriptText && !transcriptText.endsWith(' ')) transcriptText += ' ';
+    }
+  }, 10000);
+}
 
 async function startTranscription(overlap = false) {
   if (!isRecording) return;
   transcriptText = transcriptArea.value || '';
-  const dedupeAppend = (text) => {
-    // Only append if not duplicate of last 20 chars
-    if (!transcriptText.endsWith(text)) {
-      transcriptText += text;
-      transcriptArea.value = transcriptText;
-    }
-  };
 
+  if (overlap) {
+    if (!modeSwitch.checked) {
+      // Switching to offline (online -> offline)
+      await handleRecognizerOverlap({
+        prevType: 'online',
+        newType: 'offline',
+        startPrev: (cb) => startWebSpeechRecognition({
+          transcriptArea,
+          recordingStatus,
+          statusBar,
+          transcriptText,
+          onResult: cb,
+          onError: () => {},
+          onEnd: () => {}
+        }),
+        stopPrev: stopWebSpeechRecognition,
+        startNew: (cb) => loadVosk().then(() => startVoskRecognition(cb)),
+        stopNew: stopVoskRecognition,
+        dedupeAppend: dedupeAppendWithSpace,
+        transcriptArea,
+        recordingStatus,
+        statusBar
+      });
+    } else {
+      // Switching to online (offline -> online)
+      await handleRecognizerOverlap({
+        prevType: 'offline',
+        newType: 'online',
+        startPrev: (cb) => loadVosk().then(() => startVoskRecognition(cb)),
+        stopPrev: stopVoskRecognition,
+        startNew: (cb) => startWebSpeechRecognition({
+          transcriptArea,
+          recordingStatus,
+          statusBar,
+          transcriptText,
+          onResult: cb,
+          onError: () => {},
+          onEnd: () => {}
+        }),
+        stopNew: stopWebSpeechRecognition,
+        dedupeAppend: dedupeAppendWithSpace,
+        transcriptArea,
+        recordingStatus,
+        statusBar
+      });
+    }
+    return;
+  }
+
+  // Non-overlap (single recognizer) mode
   if (!modeSwitch.checked) {
-    // Offline
+    // Offline only
     try {
       await loadVosk();
       await startVoskRecognition((text, isFinal) => {
         if (isFinal) {
-          dedupeAppend(text + ' ');
+          dedupeAppendWithSpace(text + ' ', false);
         } else {
           transcriptArea.value = transcriptText + text;
         }
@@ -47,23 +275,14 @@ async function startTranscription(overlap = false) {
       });
       recordingStatus.textContent = 'Recording...';
       statusBar.textContent = 'Transcribing offline...';
-      if (overlap) {
-        pendingRecognizer = 'offline';
-        setTimeout(() => {
-          if (activeRecognizer === 'online') stopWebSpeechRecognition();
-          activeRecognizer = 'offline';
-          pendingRecognizer = null;
-        }, 5000); // 5 seconds overlap
-      } else {
-        activeRecognizer = 'offline';
-      }
+      activeRecognizer = 'offline';
     } catch (err) {
       modeSwitch.checked = true;
       statusBar.textContent = 'Offline mode failed, switched to Online.';
       startTranscription();
     }
   } else {
-    // Online
+    // Online only
     try {
       startWebSpeechRecognition({
         transcriptArea,
@@ -72,7 +291,7 @@ async function startTranscription(overlap = false) {
         transcriptText,
         onResult: (text, isFinal) => {
           if (isFinal) {
-            dedupeAppend(text);
+            dedupeAppendWithSpace(text, false);
           } else {
             transcriptArea.value = text;
           }
@@ -92,6 +311,47 @@ async function startTranscription(overlap = false) {
           stopRecording();
         },
         onEnd: (reason) => {
+          if (isRecording && activeRecognizer === 'online' && !pendingRecognizer) {
+            if (window.recognition && typeof window.recognition.start === 'function') {
+              try {
+                window.recognition.start();
+                return;
+              } catch (e) {}
+            }
+            if (!window._webspeech_restart_pending) {
+              window._webspeech_restart_pending = true;
+              setTimeout(() => {
+                window._webspeech_restart_pending = false;
+                if (isRecording && activeRecognizer === 'online' && !pendingRecognizer) {
+                  try {
+                    startWebSpeechRecognition({
+                      transcriptArea,
+                      recordingStatus,
+                      statusBar,
+                      transcriptText,
+                      onResult: (text, isFinal) => {
+                        if (isFinal) {
+                          dedupeAppendWithSpace(text, false);
+                        } else {
+                          transcriptArea.value = text;
+                        }
+                        transcriptArea.dispatchEvent(new Event('input'));
+                      },
+                      onError: (event) => {
+                        statusBar.textContent = 'Speech recognition error: ' + event.error;
+                        stopRecording();
+                      },
+                      onEnd: arguments.callee
+                    });
+                  } catch (e) {
+                    statusBar.textContent = 'Speech recognition restart failed: ' + e.message;
+                    stopRecording();
+                  }
+                }
+              }, 500);
+            }
+            return;
+          }
           if (reason === 'stopped') {
             isRecording = false;
             recordBtn.textContent = 'Start Recording';
@@ -107,16 +367,7 @@ async function startTranscription(overlap = false) {
       });
       recordingStatus.textContent = 'Recording...';
       statusBar.textContent = 'Transcribing online...';
-      if (overlap) {
-        pendingRecognizer = 'online';
-        setTimeout(() => {
-          if (activeRecognizer === 'offline') stopVoskRecognition();
-          activeRecognizer = 'online';
-          pendingRecognizer = null;
-        }, 5000); // 5 seconds overlap
-      } else {
-        activeRecognizer = 'online';
-      }
+      activeRecognizer = 'online';
     } catch (err) {
       modeSwitch.checked = false;
       statusBar.textContent = 'Online mode failed, switched to Offline.';
@@ -128,9 +379,7 @@ async function startTranscription(overlap = false) {
 // Toggle handler: switch mode instantly if recording, with overlap
 modeSwitch.addEventListener('change', async () => {
   if (isRecording) {
-    // Start new recognizer before stopping the old one
     await startTranscription(true); // overlap=true
-    // Old recognizer will be stopped after 5s overlap
   }
 });
 
@@ -257,11 +506,6 @@ window.addEventListener('DOMContentLoaded', () => {
   renderHistory();
 });
 
-// On page load, initialize
-window.addEventListener('DOMContentLoaded', () => {
-  statusBar.textContent = 'Ready.';
-});
-
 // Listen for browser offline event to auto-switch to offline mode if recording online
 window.addEventListener('offline', () => {
   if (isRecording && modeSwitch.checked) { // Only if in online mode
@@ -283,11 +527,7 @@ async function stopRecording() {
   if (typeof stopWebSpeechRecognition === 'function') {
     stopWebSpeechRecognition();
   }
-  // Stop microphone stream if active
-  if (window.voskMicStream && typeof window.voskMicStream.getTracks === 'function') {
-    window.voskMicStream.getTracks().forEach(track => track.stop());
-    window.voskMicStream = null;
-  }
+  // No need to stop window.voskMicStream (handled in vosk-integration.js)
   isRecording = false;
   recordBtn.textContent = 'Start Recording';
   recordingStatus.textContent = '';

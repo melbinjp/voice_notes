@@ -1,6 +1,6 @@
 export default {
   async fetch(request, env) {
-    // CORS headers
+    // CORS headers for all responses
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -12,11 +12,13 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
+    // Only allow POST for summarization
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405, headers: corsHeaders });
     }
 
     try {
+      // Parse request JSON
       const { text, summaryLength = 'default', summaryType = 'standard', language = 'English' } = await request.json();
 
       // Map summaryLength to max tokens
@@ -43,10 +45,10 @@ export default {
           instruction = 'Summarize the following:';
       }
 
-      // Prepend instruction to text
+      // Prepend instruction and grammar correction to text
       const input_text = `Correct all spelling and grammar mistakes, then summarize the following as clearly as possible:\n${instruction}\n${text}`;
 
-      // Call the BART summarization model
+      // Call the BART summarization model (Cloudflare AI)
       const result = await env.AI.run('@cf/facebook/bart-large-cnn', {
         input_text,
         max_length
@@ -64,6 +66,7 @@ export default {
         }
       });
     } catch (err) {
+      // Return error as JSON
       return new Response(JSON.stringify({ error: err.message }), {
         status: 500,
         headers: {

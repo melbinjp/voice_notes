@@ -77,10 +77,11 @@ function startWebSpeechRecognition({
 function stopWebSpeechRecognition() {
   shouldStopRecognition = true;
   if (recognition) {
-    recognition.onend = () => {};
-    recognition.onerror = () => {};
-    recognition.onresult = () => {};
-    recognition.onstart = () => {};
+    // Remove event listeners for GC
+    recognition.onend = null;
+    recognition.onerror = null;
+    recognition.onresult = null;
+    recognition.onstart = null;
     recognition.stop();
     recognition = null;
   }
