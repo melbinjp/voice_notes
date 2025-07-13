@@ -11,43 +11,91 @@
   <title>Voice Notes PWA</title>
 </head>
 <body>
-  <div id="app">
-    <h1>Voice Notes</h1>
-    <div class="recorder-controls">
-      <button id="recordBtn" class="main-action">Start Recording</button>
-      <span id="recordingStatus"></span>
-      <div class="switch-container">
-        <span class="switch-label">Offline</span>
-        <input type="checkbox" id="modeSwitch" class="switch-input" />
-        <label for="modeSwitch" class="switch-slider"></label>
-        <span class="switch-label">Online</span>
+  <div class="container">
+    <div class="header">
+      <h1>🎤 Voice Notes</h1>
+      <p>Modular speech recognition with AI summarization</p>
+    </div>
+
+    <div class="main-content">
+      <!-- Engine Selection -->
+      <div class="engine-section">
+        <select id="engineSelector" class="engine-selector">
+          <option value="">Loading engines...</option>
+        </select>
+        <div class="engine-info" id="engineInfo">
+          <div class="engine-type">Loading...</div>
+          <div class="engine-description">Initializing...</div>
+          <div class="engine-features" id="engineFeatures"></div>
+        </div>
+      </div>
+
+      <!-- Session Title -->
+      <input id="sessionTitle" type="text" class="session-title" placeholder="Session Title (optional)" maxlength="100" />
+
+      <!-- Recording Controls -->
+      <div class="recording-section">
+        <button id="recordBtn" class="record-btn" disabled>Start Recording</button>
+        <div id="recordingStatus" class="recording-status"></div>
+      </div>
+
+      <!-- Upload Audio Section -->
+      <div class="upload-section" id="uploadSection" style="display: none;">
+        <label for="audioFile" class="upload-label">📁 Upload Audio File</label>
+        <div class="upload-area" id="uploadArea">
+          <input type="file" id="audioFile" accept="audio/*" style="display: none;" />
+          <div class="upload-content">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">
+              <span class="upload-primary">Drop audio file here or click to browse</span>
+              <span class="upload-secondary" id="uploadFormats">Supports MP3, WAV, M4A, OGG</span>
+            </div>
+          </div>
+        </div>
+        <div class="upload-actions">
+          <button id="transcribeFileBtn" class="main-action" disabled>🎵 Transcribe File</button>
+          <div id="fileInfo" class="file-info"></div>
+        </div>
+      </div>
+
+      <!-- Transcript Section -->
+      <div class="transcript-section">
+        <label for="transcript" class="transcript-label">📝 Transcript</label>
+        <textarea id="transcript" class="transcript-area" placeholder="Your transcribed text will appear here..."></textarea>
+        <div class="transcript-actions">
+          <button id="copyTranscriptBtn" class="main-action">📋 Copy</button>
+          <button id="sendToLLMBtn" class="main-action">🤖 Summarize</button>
+        </div>
+      </div>
+
+      <!-- Summary Section -->
+      <div class="summary-section">
+        <label class="transcript-label">📊 Summary</label>
+        <div id="summary" class="summary-content"></div>
+        <button id="copySummaryBtn" class="secondary-action">📋 Copy Summary</button>
+      </div>
+
+      <!-- History Section -->
+      <div class="history-section">
+        <label class="transcript-label">📚 History</label>
+        <ul id="historyList" class="history-list"></ul>
       </div>
     </div>
-    <div class="session-title-section">
-      <input id="sessionTitle" type="text" placeholder="Session Title (optional)" maxlength="100" />
-    </div>
-    <div class="transcript-section">
-      <h2>Transcript</h2>
-      <textarea id="transcript"></textarea>
-      <button id="copyTranscriptBtn" title="Copy Transcript">Copy</button>
-      <button id="sendToLLMBtn">Summarize</button>
-      <div class="summarize-controls" id="summarizeControls"></div>
-    </div>
-    <div class="status-bar" id="statusBar"></div>
-    <div class="summary-section">
-      <h2>Summary</h2>
-      <div id="summary"></div>
-      <button id="copySummaryBtn" title="Copy Summary">Copy</button>
-    </div>
-    <div class="history-section-bottom">
-      <h2>History</h2>
-      <ul id="historyList"></ul>
-    </div>
   </div>
-  <div id="updateBanner" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(25,118,210,0.10);">
+
+  <!-- Status Bar -->
+  <div id="statusBar" class="status-bar">Initializing...</div>
+
+  <!-- Update Banner -->
+  <div id="updateBanner" style="display:none;position:fixed;bottom:60px;left:0;width:100%;background:#667eea;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(102,126,234,0.3);">
     A new version is available. Click to update.
   </div>
+
+  <!-- Load Vosk library and implementation -->
   <script src="vosk.js"></script>
-  <script type="module" src="app.js"></script>
+  <script src="vosk-latest.js?v=7"></script>
+  
+  <!-- Load the modular app -->
+  <script type="module" src="app.js?v=7"></script>
 </body>
 </html>

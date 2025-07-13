@@ -1,359 +1,630 @@
-// --- Feature 1: Audio Recording & Offline Transcription (Vosk, default) ---
-import { startVoskRecognition, stopVoskRecognition, loadVosk } from './vosk-integration.js';
-import { startWebSpeechRecognition, stopWebSpeechRecognition } from './webspeech-integration.js';
+// Voice Notes PWA - Main Application (Modular Version)
+import ModularRecognitionManager from './modular-recognition-manager.js?v=7';
 
-const recordBtn = document.getElementById('recordBtn');
-const recordingStatus = document.getElementById('recordingStatus');
-const transcriptArea = document.getElementById('transcript');
-const statusBar = document.getElementById('statusBar');
-const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
-const transcriptSection = document.querySelector('.transcript-section');
-const sendToLLMBtn = document.getElementById('sendToLLMBtn');
-const modeSwitch = document.getElementById('modeSwitch');
-const historyList = document.getElementById('historyList');
-const summaryDiv = document.getElementById('summary');
-const sessionTitleInput = document.getElementById('sessionTitle');
-let isRecording = false;
-let transcriptText = '';
-let lastSummary = '';
+// Import module loader to ensure all engines are registered
+import './module-loader.js?v=7';
 
-// Helper to start the correct mode, with overlap support
-let overlapTimeout = null;
-let activeRecognizer = null; // 'online' or 'offline'
-let pendingRecognizer = null; // 'online' or 'offline'
+// App state
+const state = {
+  isRecording: false,
+  currentEngineId: '',
+  transcript: '',
+  summary: '',
+  history: [],
+  sessionTitle: '',
+  selectedFile: null,
+  availableEngines: []
+};
 
-async function startTranscription(overlap = false) {
-  if (!isRecording) return;
-  transcriptText = transcriptArea.value || '';
-  const dedupeAppend = (text) => {
-    // Only append if not duplicate of last 20 chars
-    if (!transcriptText.endsWith(text)) {
-      transcriptText += text;
-      transcriptArea.value = transcriptText;
-    }
-  };
+// DOM elements
+const elements = {
+  recordBtn: document.getElementById('recordBtn'),
+  engineSelector: document.getElementById('engineSelector'),
+  engineInfo: document.getElementById('engineInfo'),
+  engineFeatures: document.getElementById('engineFeatures'),
+  transcript: document.getElementById('transcript'),
+  summary: document.getElementById('summary'),
+  historyList: document.getElementById('historyList'),
+  sessionTitle: document.getElementById('sessionTitle'),
+  statusBar: document.getElementById('statusBar'),
+  copyTranscriptBtn: document.getElementById('copyTranscriptBtn'),
+  sendToLLMBtn: document.getElementById('sendToLLMBtn'),
+  copySummaryBtn: document.getElementById('copySummaryBtn'),
+  updateBanner: document.getElementById('updateBanner'),
+  // Upload elements
+  audioFile: document.getElementById('audioFile'),
+  uploadArea: document.getElementById('uploadArea'),
+  uploadSection: document.getElementById('uploadSection'),
+  uploadFormats: document.getElementById('uploadFormats'),
+  transcribeFileBtn: document.getElementById('transcribeFileBtn'),
+  fileInfo: document.getElementById('fileInfo')
+};
 
-  if (!modeSwitch.checked) {
-    // Offline
-    try {
-      await loadVosk();
-      await startVoskRecognition((text, isFinal) => {
-        if (isFinal) {
-          dedupeAppend(text + ' ');
-        } else {
-          transcriptArea.value = transcriptText + text;
-        }
-        transcriptArea.dispatchEvent(new Event('input'));
-      });
-      recordingStatus.textContent = 'Recording...';
-      statusBar.textContent = 'Transcribing offline...';
-      if (overlap) {
-        pendingRecognizer = 'offline';
-        setTimeout(() => {
-          if (activeRecognizer === 'online') stopWebSpeechRecognition();
-          activeRecognizer = 'offline';
-          pendingRecognizer = null;
-        }, 5000); // 5 seconds overlap
-      } else {
-        activeRecognizer = 'offline';
-      }
-    } catch (err) {
-      modeSwitch.checked = true;
-      statusBar.textContent = 'Offline mode failed, switched to Online.';
-      startTranscription();
-    }
-  } else {
-    // Online
-    try {
-      startWebSpeechRecognition({
-        transcriptArea,
-        recordingStatus,
-        statusBar,
-        transcriptText,
-        onResult: (text, isFinal) => {
-          if (isFinal) {
-            dedupeAppend(text);
-          } else {
-            transcriptArea.value = text;
-          }
-          transcriptArea.dispatchEvent(new Event('input'));
-        },
-        onError: (event) => {
-          if (event.error === 'network' || event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-            stopRecording();
-            modeSwitch.checked = false;
-            statusBar.textContent = 'Network error, switching to offline mode...';
-            isRecording = true;
-            recordBtn.textContent = 'Stop Recording';
-            startTranscription();
-            return;
-          }
-          statusBar.textContent = 'Speech recognition error: ' + event.error;
-          stopRecording();
-        },
-        onEnd: (reason) => {
-          if (reason === 'stopped') {
-            isRecording = false;
-            recordBtn.textContent = 'Start Recording';
-            recordingStatus.textContent = '';
-            statusBar.textContent = 'Ready.';
-            return;
-          }
-          recordingStatus.textContent = '';
-          statusBar.textContent = 'Stopped.';
-          isRecording = false;
-          recordBtn.textContent = 'Start Recording';
-        }
-      });
-      recordingStatus.textContent = 'Recording...';
-      statusBar.textContent = 'Transcribing online...';
-      if (overlap) {
-        pendingRecognizer = 'online';
-        setTimeout(() => {
-          if (activeRecognizer === 'offline') stopVoskRecognition();
-          activeRecognizer = 'online';
-          pendingRecognizer = null;
-        }, 5000); // 5 seconds overlap
-      } else {
-        activeRecognizer = 'online';
-      }
-    } catch (err) {
-      modeSwitch.checked = false;
-      statusBar.textContent = 'Online mode failed, switched to Offline.';
-      startTranscription();
-    }
+// Recognition manager instance
+let recognitionManager = null;
+
+// Initialize app
+async function initializeApp() {
+  try {
+    console.log('Initializing Voice Notes PWA (Modular)...');
+    
+    // Initialize modular recognition manager
+    recognitionManager = new ModularRecognitionManager();
+    
+    // Setup event listeners
+    setupEventListeners();
+    
+    // Setup service worker
+    setupServiceWorker();
+    
+    // Discover and load available engines
+    await discoverEngines();
+    
+    // Auto-select best available engine
+    await autoSelectEngine();
+    
+    // Load history
+    loadHistory();
+    
+    // Update UI
+    updateStatus('Ready to start recording');
+    
+    console.log('App initialized successfully');
+    
+  } catch (error) {
+    console.error('Failed to initialize app:', error);
+    updateStatus('Initialization failed: ' + error.message);
   }
 }
 
-// Toggle handler: switch mode instantly if recording, with overlap
-modeSwitch.addEventListener('change', async () => {
-  if (isRecording) {
-    // Start new recognizer before stopping the old one
-    await startTranscription(true); // overlap=true
-    // Old recognizer will be stopped after 5s overlap
+// Discover available engines
+async function discoverEngines() {
+  try {
+    updateStatus('Discovering available engines...');
+    
+    // Initialize engines from registry
+    await recognitionManager.initializeEngines();
+    
+    // Get available engines
+    state.availableEngines = await recognitionManager.getAvailableEngines();
+    
+    console.log(`Found ${state.availableEngines.length} available engines:`, 
+      state.availableEngines.map(e => e.name));
+    
+    // Populate engine selector
+    populateEngineSelector();
+    
+    updateStatus(`Found ${state.availableEngines.length} available engines`);
+    
+  } catch (error) {
+    console.error('Engine discovery failed:', error);
+    updateStatus('Engine discovery failed: ' + error.message);
   }
-});
+}
 
-recordBtn.addEventListener('click', async () => {
-  if (isRecording) {
-    await stopRecording();
+// Populate engine selector dropdown
+function populateEngineSelector() {
+  const selector = elements.engineSelector;
+  selector.innerHTML = '';
+  
+  if (state.availableEngines.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No engines available';
+    option.disabled = true;
+    selector.appendChild(option);
     return;
   }
-  isRecording = true;
-  recordBtn.textContent = 'Stop Recording';
-  transcriptText = transcriptArea.value || '';
-  await startTranscription();
-});
-
-// --- Upload Audio Button (Vosk default) ---
-const uploadAudioBtn = document.createElement('button');
-uploadAudioBtn.id = 'uploadAudioBtn';
-uploadAudioBtn.textContent = 'Upload Audio';
-uploadAudioBtn.title = 'Upload an audio file to transcribe';
-uploadAudioBtn.className = 'main-action';
-if (transcriptSection) {
-  transcriptSection.insertBefore(uploadAudioBtn, transcriptSection.querySelector('#copyTranscriptBtn'));
+  
+  // Add default option
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = 'Select an engine...';
+  selector.appendChild(defaultOption);
+  
+  // Add engine options
+  state.availableEngines.forEach(engine => {
+    const option = document.createElement('option');
+    option.value = engine.id;
+    option.textContent = `${engine.icon} ${engine.name}`;
+    selector.appendChild(option);
+  });
 }
 
-uploadAudioBtn.addEventListener('click', () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'audio/*';
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      transcriptText = await transcribeAudioFileWithVosk(file, transcriptArea, statusBar);
+// Auto-select best available engine
+async function autoSelectEngine() {
+  try {
+    if (state.availableEngines.length === 0) {
+      throw new Error('No engines available');
     }
-  };
-  input.click();
-});
+    
+    // Try to auto-select best engine (prefer offline engines)
+    const bestEngine = await recognitionManager.autoSelectEngine(['offline_processing', 'file_transcription']);
+    
+    if (bestEngine) {
+      state.currentEngineId = bestEngine.id;
+      elements.engineSelector.value = bestEngine.id;
+      updateEngineInfo();
+      updateUploadSection();
+      elements.recordBtn.disabled = false;
+      
+      console.log(`Auto-selected engine: ${bestEngine.name}`);
+      updateStatus(`Using ${bestEngine.name}`);
+    }
+    
+  } catch (error) {
+    console.error('Auto-engine selection failed:', error);
+    
+    // Fallback to first available engine
+    if (state.availableEngines.length > 0) {
+      const firstEngine = state.availableEngines[0];
+      await handleEngineChange({ target: { value: firstEngine.id } });
+    }
+  }
+}
 
-// Remove the transcribe online button if it exists
-const transcribeOnlineBtn = document.getElementById('transcribeOnlineBtn');
-if (transcribeOnlineBtn) transcribeOnlineBtn.remove();
-
-// Scroll transcript to bottom as new text is added
-if (transcriptArea) {
-  transcriptArea.addEventListener('input', () => {
-    transcriptArea.scrollTop = transcriptArea.scrollHeight;
+// Setup event listeners
+function setupEventListeners() {
+  // Record button
+  elements.recordBtn.addEventListener('click', toggleRecording);
+  
+  // Engine selector
+  elements.engineSelector.addEventListener('change', handleEngineChange);
+  
+  // Copy buttons
+  elements.copyTranscriptBtn.addEventListener('click', copyTranscript);
+  elements.copySummaryBtn.addEventListener('click', copySummary);
+  
+  // Send to LLM button
+  elements.sendToLLMBtn.addEventListener('click', sendToLLM);
+  
+  // Session title
+  elements.sessionTitle.addEventListener('input', (e) => {
+    state.sessionTitle = e.target.value;
   });
+  
+  // Update banner
+  elements.updateBanner.addEventListener('click', () => {
+    window.location.reload();
+  });
+
+  // Upload functionality
+  setupUploadEventListeners();
+}
+
+// Setup upload event listeners
+function setupUploadEventListeners() {
+  // File input change
+  elements.audioFile.addEventListener('change', handleFileSelect);
+  
+  // Upload area click
+  elements.uploadArea.addEventListener('click', () => {
+    elements.audioFile.click();
+  });
+  
+  // Drag and drop
+  elements.uploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    elements.uploadArea.classList.add('drag-over');
+  });
+  
+  elements.uploadArea.addEventListener('dragleave', () => {
+    elements.uploadArea.classList.remove('drag-over');
+  });
+  
+  elements.uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    elements.uploadArea.classList.remove('drag-over');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleFileSelect({ target: { files } });
+    }
+  });
+  
+  // Transcribe file button
+  elements.transcribeFileBtn.addEventListener('click', transcribeSelectedFile);
+}
+
+// Handle file selection
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  // Validate file type
+  if (!file.type.startsWith('audio/')) {
+    updateStatus('Please select an audio file');
+    return;
+  }
+  
+  // Check if current engine supports file transcription
+  if (!recognitionManager.supportsFeature('file_transcription')) {
+    updateStatus('Current engine does not support file transcription');
+    return;
+  }
+  
+  // Check file size
+  const currentEngine = recognitionManager.getCurrentEngineInfo();
+  if (currentEngine && currentEngine.maxFileSize && file.size > currentEngine.maxFileSize) {
+    updateStatus(`File too large. Maximum size: ${(currentEngine.maxFileSize / 1024 / 1024).toFixed(1)}MB`);
+    return;
+  }
+  
+  state.selectedFile = file;
+  updateFileInfo(file);
+  elements.transcribeFileBtn.disabled = false;
+}
+
+// Update file info display
+function updateFileInfo(file) {
+  const size = (file.size / 1024 / 1024).toFixed(2);
+  const type = file.type || 'Unknown';
+  
+  elements.fileInfo.innerHTML = `
+    <div class="file-details">
+      <strong>${file.name}</strong><br>
+      <small>${type} • ${size} MB</small>
+    </div>
+  `;
+}
+
+// Transcribe selected file
+async function transcribeSelectedFile() {
+  if (!state.selectedFile) {
+    updateStatus('No file selected');
+    return;
+  }
+  
+  try {
+    updateStatus('Transcribing file...');
+    elements.transcribeFileBtn.disabled = true;
+    
+    const result = await recognitionManager.transcribeFile(state.selectedFile);
+    
+    // Update transcript
+    state.transcript = result.text;
+    elements.transcript.value = result.text;
+    
+    updateStatus(`File transcribed successfully (${result.duration}s)`);
+    
+    // Save to history
+    if (result.text.trim()) {
+      saveToHistory();
+    }
+    
+  } catch (error) {
+    console.error('File transcription failed:', error);
+    updateStatus('File transcription failed: ' + error.message);
+  } finally {
+    elements.transcribeFileBtn.disabled = false;
+  }
+}
+
+// Setup service worker
+function setupServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./service-worker.js')
+      .then(registration => {
+        console.log('ServiceWorker registered:', registration.scope);
+        
+        // Check for updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              elements.updateBanner.style.display = 'block';
+            }
+          });
+        });
+      })
+      .catch(error => {
+        console.error('ServiceWorker registration failed:', error);
+      });
+  }
+}
+
+// Handle engine change
+async function handleEngineChange(event) {
+  const engineId = event.target.value;
+  
+  if (!engineId) {
+    state.currentEngineId = '';
+    updateEngineInfo();
+    updateUploadSection();
+    elements.recordBtn.disabled = true;
+    return;
+  }
+  
+  try {
+    updateStatus(`Switching to ${engineId}...`);
+    elements.recordBtn.disabled = true;
+    
+    await recognitionManager.setEngine(engineId);
+    state.currentEngineId = engineId;
+    
+    updateEngineInfo();
+    updateUploadSection();
+    elements.recordBtn.disabled = false;
+    
+    updateStatus(`Switched to ${recognitionManager.getCurrentEngineInfo().name}`);
+    
+  } catch (error) {
+    console.error('Engine change failed:', error);
+    updateStatus('Engine change failed: ' + error.message);
+    elements.recordBtn.disabled = true;
+  }
+}
+
+// Update engine info display
+function updateEngineInfo() {
+  const engineInfo = recognitionManager.getCurrentEngineInfo();
+  
+  if (!engineInfo) {
+    elements.engineInfo.innerHTML = `
+      <div class="engine-type">No engine selected</div>
+      <div class="engine-description">Please select an engine</div>
+      <div class="engine-features"></div>
+    `;
+    return;
+  }
+  
+  const typeText = engineInfo.isOffline ? '🔒 Offline' : '🌐 Online';
+  const features = engineInfo.features.map(f => `<span class="feature-tag">${f}</span>`).join('');
+  
+  elements.engineInfo.innerHTML = `
+    <div class="engine-type">${typeText}</div>
+    <div class="engine-description">${engineInfo.description}</div>
+    <div class="engine-features">${features}</div>
+  `;
+}
+
+// Update upload section visibility
+function updateUploadSection() {
+  const engineInfo = recognitionManager.getCurrentEngineInfo();
+  
+  if (engineInfo && engineInfo.features.includes('file_transcription')) {
+    elements.uploadSection.style.display = 'block';
+    
+    // Update supported formats
+    if (engineInfo.supportedFormats && engineInfo.supportedFormats.length > 0) {
+      const formats = engineInfo.supportedFormats.map(f => f.split('/')[1].toUpperCase()).join(', ');
+      elements.uploadFormats.textContent = `Supports ${formats}`;
+    }
+  } else {
+    elements.uploadSection.style.display = 'none';
+  }
+}
+
+// Toggle recording
+async function toggleRecording() {
+  if (state.isRecording) {
+    await stopRecording();
+  } else {
+    await startRecording();
+  }
+}
+
+// Start recording
+async function startRecording() {
+  try {
+    if (!recognitionManager.getCurrentEngine()) {
+      throw new Error('No engine selected');
+    }
+    
+    updateStatus('Starting recording...');
+    elements.recordBtn.disabled = true;
+    
+    const success = await recognitionManager.start(
+      (text, isFinal) => {
+        if (isFinal) {
+          state.transcript += (state.transcript ? ' ' : '') + text;
+          elements.transcript.value = state.transcript;
+        }
+      },
+      (error) => {
+        console.error('Recognition error:', error);
+        updateStatus('Recognition error: ' + error.message);
+      },
+      (status) => {
+        updateStatus(status);
+      }
+    );
+    
+    if (success) {
+      state.isRecording = true;
+      updateRecordingUI();
+    }
+    
+  } catch (error) {
+    console.error('Failed to start recording:', error);
+    updateStatus('Failed to start recording: ' + error.message);
+    elements.recordBtn.disabled = false;
+  }
+}
+
+// Stop recording
+async function stopRecording() {
+  try {
+    await recognitionManager.stop();
+    state.isRecording = false;
+    updateRecordingUI();
+    
+    // Save to history if we have content
+    if (state.transcript.trim()) {
+      saveToHistory();
+    }
+    
+  } catch (error) {
+    console.error('Failed to stop recording:', error);
+    updateStatus('Failed to stop recording: ' + error.message);
+  }
+}
+
+// Update recording UI
+function updateRecordingUI() {
+  if (state.isRecording) {
+    elements.recordBtn.textContent = 'Stop Recording';
+    elements.recordBtn.classList.add('recording');
+    elements.recordingStatus.textContent = 'Recording...';
+    elements.recordingStatus.classList.add('active');
+  } else {
+    elements.recordBtn.textContent = 'Start Recording';
+    elements.recordBtn.classList.remove('recording');
+    elements.recordingStatus.textContent = '';
+    elements.recordingStatus.classList.remove('active');
+    elements.recordBtn.disabled = false;
+  }
 }
 
 // Copy transcript
-if (copyTranscriptBtn) {
-  copyTranscriptBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(transcriptArea.value);
-    statusBar.textContent = 'Transcript copied!';
-  });
+async function copyTranscript() {
+  try {
+    await navigator.clipboard.writeText(state.transcript);
+    updateStatus('Transcript copied to clipboard');
+  } catch (error) {
+    console.error('Failed to copy transcript:', error);
+    updateStatus('Failed to copy transcript');
+  }
 }
 
-// --- History Save/Load Logic ---
-function saveNoteToHistory({ title, transcript, summary }) {
-  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
-  notes.unshift({
-    title: title || `Note ${new Date().toLocaleString()}`,
-    transcript,
-    summary,
-    timestamp: Date.now()
-  });
-  localStorage.setItem('voiceNotesHistory', JSON.stringify(notes));
-  renderHistory();
+// Copy summary
+async function copySummary() {
+  try {
+    await navigator.clipboard.writeText(state.summary);
+    updateStatus('Summary copied to clipboard');
+  } catch (error) {
+    console.error('Failed to copy summary:', error);
+    updateStatus('Failed to copy summary');
+  }
 }
 
-function renderHistory() {
-  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
+// Send to LLM
+async function sendToLLM() {
+  if (!state.transcript.trim()) {
+    updateStatus('No transcript to summarize');
+    return;
+  }
+  
+  try {
+    updateStatus('Generating summary...');
+    elements.sendToLLMBtn.disabled = true;
+    
+    const summary = await generateSummary(state.transcript);
+    state.summary = summary;
+    elements.summary.textContent = summary;
+    
+    updateStatus('Summary generated successfully');
+    
+  } catch (error) {
+    console.error('Failed to generate summary:', error);
+    updateStatus('Failed to generate summary: ' + error.message);
+  } finally {
+    elements.sendToLLMBtn.disabled = false;
+  }
+}
+
+// Generate summary using AI
+async function generateSummary(transcript) {
+  // This is a placeholder - you would integrate with your preferred AI service
+  // For now, we'll create a simple summary
+  
+  const sentences = transcript.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const wordCount = transcript.split(/\s+/).length;
+  
+  if (wordCount < 10) {
+    return transcript;
+  }
+  
+  const summary = sentences.slice(0, Math.min(3, sentences.length)).join('. ') + '.';
+  return `Summary (${wordCount} words): ${summary}`;
+}
+
+// Save to history
+function saveToHistory() {
+  const entry = {
+    id: Date.now(),
+    title: state.sessionTitle || 'Untitled Session',
+    transcript: state.transcript,
+    summary: state.summary,
+    engine: recognitionManager.getCurrentEngineInfo()?.name || 'Unknown',
+    timestamp: new Date().toISOString(),
+    wordCount: state.transcript.split(/\s+/).length
+  };
+  
+  state.history.unshift(entry);
+  
+  // Keep only last 50 entries
+  if (state.history.length > 50) {
+    state.history = state.history.slice(0, 50);
+  }
+  
+  // Save to localStorage
+  localStorage.setItem('voiceNotesHistory', JSON.stringify(state.history));
+  
+  updateHistoryUI();
+}
+
+// Load history
+function loadHistory() {
+  try {
+    const saved = localStorage.getItem('voiceNotesHistory');
+    if (saved) {
+      state.history = JSON.parse(saved);
+      updateHistoryUI();
+    }
+  } catch (error) {
+    console.error('Failed to load history:', error);
+  }
+}
+
+// Update history UI
+function updateHistoryUI() {
+  const historyList = elements.historyList;
   historyList.innerHTML = '';
-  notes.forEach((note, idx) => {
+  
+  if (state.history.length === 0) {
+    historyList.innerHTML = '<li class="no-history">No history yet</li>';
+    return;
+  }
+  
+  state.history.forEach(entry => {
     const li = document.createElement('li');
-    li.className = 'history-dropdown';
+    li.className = 'history-item';
     li.innerHTML = `
-      <div class="history-title-row">
-        <button class="history-title-btn" data-idx="${idx}">
-          <span class="history-title-text">${note.title || 'Untitled'}</span>
-        </button>
-        <div class="history-actions-inline">
-          <button class="export-note-btn" title="Copy Transcript" data-idx="${idx}">📋</button>
-          <button class="delete-note-btn" title="Delete Note" data-idx="${idx}">🗑️</button>
-        </div>
+      <div class="history-header">
+        <span class="history-title">${entry.title}</span>
+        <span class="history-meta">
+          ${entry.engine} • ${entry.wordCount} words • ${new Date(entry.timestamp).toLocaleDateString()}
+        </span>
       </div>
-      <div class="history-details" style="display:none;"></div>
+      <div class="history-preview">${entry.transcript.substring(0, 100)}${entry.transcript.length > 100 ? '...' : ''}</div>
+      <button class="load-history-btn" onclick="loadHistoryEntry('${entry.id}')">Load</button>
     `;
     historyList.appendChild(li);
   });
 }
 
-// Expand/collapse and actions
-historyList.addEventListener('click', (e) => {
-  const btn = e.target.closest('.history-title-btn');
-  const copyBtn = e.target.closest('.export-note-btn');
-  const delBtn = e.target.closest('.delete-note-btn');
-  const notes = JSON.parse(localStorage.getItem('voiceNotesHistory') || '[]');
-  if (btn) {
-    const idx = btn.dataset.idx;
-    const li = btn.closest('li');
-    const details = li.querySelector('.history-details');
-    if (details.style.display === 'none') {
-      const note = notes[idx];
-      details.innerHTML = `<b>Transcript:</b><br><pre>${note.transcript}</pre><b>Summary:</b><br><pre>${note.summary || ''}</pre>`;
-      details.style.display = 'block';
-    } else {
-      details.style.display = 'none';
-    }
-  } else if (copyBtn) {
-    const idx = copyBtn.dataset.idx;
-    navigator.clipboard.writeText(notes[idx].transcript + '\n\n' + (notes[idx].summary || ''));
-    statusBar.textContent = 'Note copied!';
-  } else if (delBtn) {
-    const idx = delBtn.dataset.idx;
-    notes.splice(idx, 1);
-    localStorage.setItem('voiceNotesHistory', JSON.stringify(notes));
-    renderHistory();
-    statusBar.textContent = 'Note deleted.';
+// Load history entry
+window.loadHistoryEntry = function(entryId) {
+  const entry = state.history.find(h => h.id.toString() === entryId);
+  if (entry) {
+    state.transcript = entry.transcript;
+    state.summary = entry.summary;
+    state.sessionTitle = entry.title;
+    
+    elements.transcript.value = entry.transcript;
+    elements.summary.textContent = entry.summary;
+    elements.sessionTitle.value = entry.title;
+    
+    updateStatus(`Loaded session: ${entry.title}`);
   }
-});
+};
 
-window.addEventListener('DOMContentLoaded', () => {
-  statusBar.textContent = 'Ready.';
-  renderHistory();
-});
-
-// On page load, initialize
-window.addEventListener('DOMContentLoaded', () => {
-  statusBar.textContent = 'Ready.';
-});
-
-// Listen for browser offline event to auto-switch to offline mode if recording online
-window.addEventListener('offline', () => {
-  if (isRecording && modeSwitch.checked) { // Only if in online mode
-    stopRecording();
-    modeSwitch.checked = false;
-    statusBar.textContent = 'Internet lost, switching to offline mode...';
-    isRecording = true;
-    recordBtn.textContent = 'Stop Recording';
-    startTranscription();
-  }
-});
-
-async function stopRecording() {
-  // Stop offline (Vosk) recognition
-  if (typeof stopVoskRecognition === 'function') {
-    await stopVoskRecognition();
-  }
-  // Stop online (Web Speech API) recognition
-  if (typeof stopWebSpeechRecognition === 'function') {
-    stopWebSpeechRecognition();
-  }
-  // Stop microphone stream if active
-  if (window.voskMicStream && typeof window.voskMicStream.getTracks === 'function') {
-    window.voskMicStream.getTracks().forEach(track => track.stop());
-    window.voskMicStream = null;
-  }
-  isRecording = false;
-  recordBtn.textContent = 'Start Recording';
-  recordingStatus.textContent = '';
-  statusBar.textContent = 'Ready.';
+// Update status
+function updateStatus(message) {
+  elements.statusBar.textContent = message;
+  console.log('Status:', message);
 }
 
-// --- Implement transcribeAudioFileWithVosk for upload ---
-async function transcribeAudioFileWithVosk(file, transcriptArea, statusBar) {
-  await loadVosk();
-  statusBar.textContent = 'Transcribing offline...';
-  const arrayBuffer = await file.arrayBuffer();
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  const pcm = audioBuffer.getChannelData(0);
-  const int16 = new Int16Array(pcm.length);
-  for (let i = 0; i < pcm.length; i++) {
-    int16[i] = Math.max(-32768, Math.min(32767, pcm[i] * 32767));
-  }
-  const recognizer = new Vosk.Recognizer(voskModel, audioBuffer.sampleRate);
-  recognizer.acceptWaveform(int16);
-  const res = recognizer.finalResult();
-  recognizer.free();
-  audioCtx.close();
-  const text = res.text || '';
-  transcriptArea.value = text;
-  transcriptArea.dispatchEvent(new Event('input'));
-  statusBar.textContent = 'Offline transcription complete.';
-  return text;
-}
-
-// --- Fix summarize button logic and error handling ---
-sendToLLMBtn.addEventListener('click', async () => {
-  const transcript = transcriptArea.value.trim();
-  if (!transcript) {
-    statusBar.textContent = 'No transcript to summarize.';
-    return;
-  }
-  statusBar.textContent = 'Sending transcript to backend for summarization...';
-  sendToLLMBtn.disabled = true;
-  try {
-    const endpoint = 'https://llm.melbinjpaulose.workers.dev/';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: transcript })
-    });
-    if (!res.ok) throw new Error('Backend error: ' + res.status);
-    const data = await res.json();
-    let html = '';
-    if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
-    const points = data.keyPoints || data.bullets;
-    if (points && Array.isArray(points)) {
-      html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
-    }
-    summary.innerHTML = html;
-    lastSummary = data.summary || '';
-    // Save to history
-    saveNoteToHistory({
-      title: sessionTitleInput.value,
-      transcript: transcriptArea.value,
-      summary: lastSummary
-    });
-    statusBar.textContent = 'Summary received and note saved.';
-  } catch (e) {
-    summary.innerHTML = '';
-    statusBar.textContent = 'Error: ' + e.message;
-  }
-  sendToLLMBtn.disabled = false;
-});
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', initializeApp);
