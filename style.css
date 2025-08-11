@@ -1,377 +1,274 @@
-body {
-  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-  background: #f4f6fa;
-  color: #222;
-  margin: 0;
-  padding: 0;
-}
-#app {
-  max-width: 800px;
-  margin: 32px auto 0 auto;
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 4px 32px 0 rgba(60,72,88,0.10), 0 1.5px 4px 0 rgba(60,72,88,0.08);
-  padding: 28px 16px 16px 16px;
-  min-height: 80vh;
+/* --- Modern CSS Reset --- */
+*, *::before, *::after {
   box-sizing: border-box;
 }
-h1 {
-  font-size: 2.1rem;
-  font-weight: 700;
-  margin: 0 0 18px 0;
-  letter-spacing: -1px;
-  color: #1976d2;
-  text-align: center;
+body, h1, h2, p, ul, li {
+  margin: 0;
 }
+ul {
+  padding: 0;
+  list-style: none;
+}
+button {
+  font: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+textarea, input {
+  font: inherit;
+}
+
+/* --- Base Styles --- */
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: #f0f2f5;
+  color: #1c1e21;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  max-width: 700px;
+  margin: 40px auto;
+  padding: 32px;
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 24px;
+  color: #0d6efd;
+  letter-spacing: -0.5px;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #343a40;
+}
+
+/* --- Sections --- */
+.recorder-controls,
+.session-title-section,
+.transcript-section,
+.summary-section,
+.settings-section,
+.history-section-bottom {
+  margin-bottom: 24px;
+}
+
+/* --- Recorder Controls --- */
 .recorder-controls {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 12px;
 }
+
 #recordBtn {
-  background: linear-gradient(90deg, #1976d2 60%, #42a5f5 100%);
+  background: #0d6efd;
   color: #fff;
-  border: none;
-  border-radius: 22px;
-  font-size: 1.1rem;
+  border-radius: 12px;
+  font-size: 1rem;
   font-weight: 600;
-  padding: 10px 28px;
-  box-shadow: 0 2px 8px 0 rgba(25,118,210,0.08);
-  cursor: pointer;
-  transition: background 0.18s, box-shadow 0.18s;
-  min-width: 44px;
-  min-height: 44px;
+  padding: 12px 24px;
+  transition: background-color 0.2s ease, transform 0.1s ease;
 }
-#recordBtn:active, #recordBtn:focus {
-  background: #1565c0;
-  outline: none;
+
+#recordBtn:hover {
+  background: #0b5ed7;
 }
+
+#recordBtn:active {
+  transform: scale(0.98);
+}
+
 #recordingStatus {
-  font-size: 1.1rem;
-  color: #d32f2f;
-  font-weight: 500;
+  font-weight: 600;
+  color: #d9534f;
 }
-.session-title-section {
-  margin-bottom: 12px;
-}
+
+/* --- Session Title Input --- */
 #sessionTitle {
   width: 100%;
-  font-size: 1.1rem;
-  padding: 8px 14px;
-  border: 1.5px solid #e0e0e0;
-  border-radius: 16px;
-  background: #f7fafd;
-  transition: border 0.15s;
-  box-sizing: border-box;
+  padding: 12px 16px;
+  font-size: 1rem;
+  border: 1px solid #ced4da;
+  border-radius: 12px;
+  background-color: #f8f9fa;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+
 #sessionTitle:focus {
-  border: 1.5px solid #1976d2;
   outline: none;
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
 }
-.transcript-section, .summary-section {
-  margin-bottom: 16px;
-}
-.transcript-section h2, .summary-section h2, .history-section-bottom h2 {
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #1976d2;
-  margin-bottom: 8px;
-  margin-top: 0;
-}
-#transcript {
+
+/* --- Transcript & Summary Textareas --- */
+#transcript, #summary {
   width: 100%;
-  min-height: 120px;
-  max-height: 220px;
-  font-size: 1.12rem;
-  padding: 10px 14px;
-  border: 1.5px solid #e0e0e0;
-  border-radius: 10px;
-  background: #f7fafd;
-  margin-bottom: 8px;
+  min-height: 140px;
+  padding: 12px 16px;
+  font-size: 1rem;
+  border: 1px solid #ced4da;
+  border-radius: 12px;
+  background-color: #f8f9fa;
   resize: vertical;
-  transition: border 0.15s;
-  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+
 #transcript:focus {
-  border: 1.5px solid #1976d2;
   outline: none;
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
 }
-#copyTranscriptBtn, #sendToLLMBtn, #copySummaryBtn, #pasteTestBtn {
-  background: #fff;
-  color: #1976d2;
-  border: 1.5px solid #1976d2;
-  border-radius: 22px;
-  font-size: 1.1rem;
-  font-weight: 500;
-  padding: 7px 18px;
-  margin-right: 8px;
-  margin-bottom: 4px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border 0.15s;
-  min-width: 44px;
-  min-height: 44px;
+
+#summary {
+  background-color: #e9ecef;
+  min-height: 100px;
 }
-#copyTranscriptBtn:hover, #sendToLLMBtn:hover, #copySummaryBtn:hover, #pasteTestBtn:hover {
-  background: #1976d2;
+
+/* --- Action Buttons --- */
+.transcript-section .actions,
+.summary-section .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#copyTranscriptBtn, #sendToLLMBtn, #copySummaryBtn, #pasteTestBtn, #clearTranscriptionModelBtn, #clearSummarizationModelBtn {
+  background-color: #fff;
+  color: #0d6efd;
+  border: 1px solid #0d6efd;
+  border-radius: 12px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+#copyTranscriptBtn:hover, #sendToLLMBtn:hover, #copySummaryBtn:hover, #pasteTestBtn:hover, #clearTranscriptionModelBtn:hover, #clearSummarizationModelBtn:hover {
+  background-color: #0d6efd;
   color: #fff;
 }
-.summarize-controls, .summarize-group, .summarize-label, .arrow, .summarize-btn, .icon-style, .icon-length {
-  display: none !important;
-}
-#summary {
-  min-height: 80px;
-  max-height: 220px;
-  overflow-y: auto;
-  background: #f7fafd;
-  border: 1.5px solid #e0e0e0;
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  font-size: 1.12rem;
-  box-shadow: 0 1px 4px 0 rgba(25,118,210,0.04);
-  box-sizing: border-box;
-}
+
+/* --- Status Bar --- */
 .status-bar {
-  position: relative;
-  background: #e3f0fc;
-  border-top: 2px solid #1976d2;
-  border-bottom: 1px solid #e0e0e0;
   padding: 12px 16px;
-  font-size: 1.1rem;
+  background-color: #e7f1ff;
+  border-left: 4px solid #0d6efd;
+  color: #0a58ca;
   font-weight: 500;
-  z-index: 10;
-  margin-bottom: 18px;
-  margin-top: 8px;
-  border-radius: 8px 8px 0 0;
-  color: #1976d2;
-  box-shadow: 0 1px 4px 0 rgba(25,118,210,0.04);
+  border-radius: 8px;
 }
-.history-section-bottom {
-  width: 100%;
-  background: #f7f7fa;
-  border-top: 1px solid #e0e0e0;
-  margin-top: 16px;
-  padding: 8px 0 0 0;
-  border-radius: 0 0 18px 18px;
-  box-shadow: 0 -2px 8px 0 rgba(60,72,88,0.06);
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-  padding-bottom: 8px;
-}
-.history-section-bottom h2 {
-  font-size: 1.1rem;
-  margin: 0 0 8px 16px;
-  color: #1976d2;
-}
-#historyList {
-  list-style: none;
-  margin: 0;
-  padding: 0 16px 10px 16px;
-  max-height: 180px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.sidebar-session-title {
+
+/* --- Settings Section --- */
+.settings-section .setting {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid #ececec;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.sidebar-session-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 1rem;
-  line-height: 1.2;
-}
-.sidebar-session-actions {
-  display: flex;
   align-items: center;
-  gap: 2px;
-  margin-left: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid #e9ecef;
 }
-.export-note-btn, .delete-note-btn {
-  background: #fff;
-  border: 1.5px solid #e0e0e0;
-  border-radius: 50%;
-  padding: 4px;
-  margin-left: 2px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  height: 28px;
-  width: 28px;
-  justify-content: center;
-  transition: background 0.15s, border 0.15s;
-  box-shadow: 0 1px 4px 0 rgba(60,72,88,0.04);
+.settings-section .setting:last-child {
+  border-bottom: none;
 }
-.export-note-btn:hover, .delete-note-btn:hover {
-  background: #f0f0f0;
-  border: 1.5px solid #1976d2;
+.settings-section span {
+  font-weight: 500;
 }
-.export-note-btn svg {
-  stroke: #2e7d32 !important;
-  vertical-align: middle;
+#transcriptionModelStatus, #summarizationModelStatus {
+  font-style: italic;
+  color: #6c757d;
 }
-.delete-note-btn svg {
-  stroke: #d32f2f !important;
-  vertical-align: middle;
+
+/* --- History Section --- */
+.history-section-bottom {
+  border-top: 1px solid #e9ecef;
+  padding-top: 16px;
 }
-/* --- History dropdown and actions layout improvements --- */
+
+#historyList {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 8px; /* For scrollbar */
+}
+
 .history-dropdown {
-  width: 100%;
-  box-sizing: border-box;
+  background-color: #f8f9fa;
+  border-radius: 12px;
   margin-bottom: 8px;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 1px 4px 0 rgba(60,72,88,0.04);
-  padding: 0;
 }
+
 .history-title-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 0 8px 0 8px;
-  min-height: 44px;
-  box-sizing: border-box;
-}
-.history-title-btn {
-  flex: 1 1 auto;
-  background: none;
-  border: none;
-  outline: none;
+  padding: 12px 16px;
   cursor: pointer;
-  padding: 12px 0 12px 0;
-  text-align: left;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  width: 100%;
 }
+
 .history-arrow {
-  font-size: 1.1em;
-  margin-right: 8px;
-  color: #1976d2;
-  transition: transform 0.18s;
-  flex-shrink: 0;
+  margin-right: 12px;
+  color: #0d6efd;
+  transition: transform 0.2s ease;
 }
+
+.history-title-btn[aria-expanded="true"] .history-arrow {
+  transform: rotate(90deg);
+}
+
 .history-title-text {
-  display: block;
+  font-weight: 600;
+  color: #1c1e21;
+  flex-grow: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: #1976d2;
-  padding-right: 12px;
 }
+
 .history-actions-inline {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.history-actions-inline .export-note-btn,
-.history-actions-inline .delete-note-btn {
-  margin-left: 0;
-  margin-right: 0;
-}
-.history-details {
-  padding: 12px 16px 8px 16px;
-  border-top: 1px solid #e0e0e0;
-  background: #f7fafd;
-  border-radius: 0 0 10px 10px;
-  margin-top: 0;
-}
-.history-actions-expanded {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  margin-top: 10px;
 }
-@media (max-width: 800px) {
+
+.history-details {
+  padding: 16px;
+  border-top: 1px solid #e9ecef;
+  background-color: #fff;
+  border-radius: 0 0 12px 12px;
+}
+
+.history-meta, .history-transcript, .history-summary, .history-keypoints {
+  margin-bottom: 12px;
+}
+
+/* --- Responsive Design --- */
+@media (max-width: 768px) {
   #app {
-    max-width: 100vw;
-    width: 100vw;
-    min-width: 0;
-    padding: 0.5rem 0.5rem 0.5rem 0.5rem;
-    border-radius: 0;
-    box-shadow: none;
     margin: 0;
-  }
-  .history-section-bottom {
-    max-height: 160px;
-    padding-bottom: 60px;
-    border-radius: 0 0 12px 12px;
+    border-radius: 0;
+    min-height: 100vh;
+    padding: 24px;
   }
 }
-@media (max-width: 600px) {
+@media (max-width: 480px) {
+  body {
+    font-size: 14px;
+  }
   #app {
-    max-width: 100vw;
-    min-width: 0;
-    width: 100vw;
-    padding: 0.1rem;
-    min-height: 100vh;
+    padding: 16px;
   }
   h1 {
-    font-size: 1.25rem;
-    margin-bottom: 10px;
+    font-size: 1.75rem;
   }
   .recorder-controls {
     flex-direction: column;
-    gap: 10px;
-    width: 100%;
-  }
-  .session-title-section, .transcript-section, .summary-section, .history-section-bottom {
-    padding: 0.1rem 0.05rem 0.1rem 0.05rem;
-    margin-bottom: 0.2rem;
-  }
-  #sessionTitle {
-    width: 100%;
-    font-size: 1em;
-    padding: 8px 10px;
-  }
-  #transcript {
-    font-size: 1em;
-    min-height: 48px;
-    max-height: 120px;
-    padding: 8px 10px;
-  }
-  #summary {
-    font-size: 1em;
-    min-height: 30px;
-    max-height: 120px;
-    padding: 8px 10px;
-  }
-  #copyTranscriptBtn, #sendToLLMBtn, #copySummaryBtn, #pasteTestBtn {
-    font-size: 0.95em;
-    padding: 7px 10px;
-    margin-right: 4px;
-    margin-bottom: 4px;
-  }
-  #historyList {
-    max-height: 90px;
-    padding: 0 6px 10px 6px;
-    scrollbar-width: none;
-  }
-  #historyList::-webkit-scrollbar {
-    display: none;
-  }
-  .history-title-row {
-    padding: 0 2vw 0 2vw;
-  }
-  .history-details {
-    padding: 10px 4vw 8px 4vw;
+    align-items: flex-start;
   }
 }

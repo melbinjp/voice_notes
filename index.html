@@ -23,15 +23,20 @@
     <div class="transcript-section">
       <h2>Transcript</h2>
       <textarea id="transcript"></textarea>
-      <button id="copyTranscriptBtn" title="Copy Transcript">Copy</button>
-      <button id="sendToLLMBtn">Summarize</button>
+      <div class="actions">
+        <button id="pasteTestBtn" title="Paste clipboard text into transcript">Paste Text</button>
+        <button id="copyTranscriptBtn" title="Copy Transcript">Copy</button>
+        <button id="sendToLLMBtn">Summarize</button>
+      </div>
       <div class="summarize-controls" id="summarizeControls"></div>
     </div>
     <div class="status-bar" id="statusBar"></div>
     <div class="summary-section">
       <h2>Summary</h2>
       <div id="summary"></div>
-      <button id="copySummaryBtn" title="Copy Summary">Copy</button>
+      <div class="actions">
+        <button id="copySummaryBtn" title="Copy Summary">Copy</button>
+      </div>
     </div>
     <div class="settings-section">
       <h2>Settings</h2>
@@ -54,7 +59,7 @@
   <div id="updateBanner" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(25,118,210,0.10);">
     A new version is available. Click to update.
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
-  <script src="app.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

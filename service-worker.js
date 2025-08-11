@@ -6,7 +6,6 @@ const urlsToCache = [
   '/style.css',
   '/app.js',
   '/manifest.json',
-  'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1',
 ];
 
 self.addEventListener('install', event => {

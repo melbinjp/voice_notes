@@ -126,18 +126,7 @@ if (summarizeControls) {
   summarizeControls.remove();
 }
 
-// Add a paste button for testing
-const pasteTestBtn = document.createElement('button');
-pasteTestBtn.id = 'pasteTestBtn';
-pasteTestBtn.textContent = 'Paste Text';
-pasteTestBtn.title = 'Paste clipboard text into transcript';
-pasteTestBtn.style.marginRight = '8px';
-
-const transcriptSection = document.querySelector('.transcript-section');
-if (transcriptSection) {
-  transcriptSection.insertBefore(pasteTestBtn, transcriptSection.querySelector('#copyTranscriptBtn'));
-}
-
+const pasteTestBtn = document.getElementById('pasteTestBtn');
 pasteTestBtn.addEventListener('click', async () => {
   try {
     const text = await navigator.clipboard.readText();
@@ -631,58 +620,6 @@ window.addEventListener('DOMContentLoaded', () => {
     statusBar.parentNode.insertBefore(installBtn, statusBar.nextSibling);
   }
   renderHistory();
-});
-
-// Sidebar toggle logic
-const sidebarToggle = document.getElementById('sidebarToggle');
-const sidebar = document.getElementById('sidebar');
-const appMain = document.getElementById('app');
-
-function setHamburgerState(open) {
-  if (open) {
-    sidebarToggle.classList.add('open');
-    sidebarToggle.setAttribute('aria-label', 'Hide sidebar');
-  } else {
-    sidebarToggle.classList.remove('open');
-    sidebarToggle.setAttribute('aria-label', 'Show sidebar');
-  }
-}
-
-function closeSidebar() {
-  sidebar.classList.remove('open');
-  appMain.classList.remove('with-sidebar');
-  setHamburgerState(false);
-}
-function openSidebar() {
-  sidebar.classList.add('open');
-  appMain.classList.add('with-sidebar');
-  setHamburgerState(true);
-}
-if (sidebarToggle && sidebar && appMain) {
-  sidebarToggle.addEventListener('click', () => {
-    if (sidebar.classList.contains('open')) {
-      closeSidebar();
-    } else {
-      openSidebar();
-    }
-  });
-  // Close sidebar on click outside (desktop and mobile)
-  window.addEventListener('click', (e) => {
-    if (sidebar.classList.contains('open')) {
-      if (!sidebar.contains(e.target) && !sidebarToggle.contains(e.target)) {
-        closeSidebar();
-      }
-    }
-  });
-  // Close sidebar on Escape key
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sidebar.classList.contains('open')) {
-      closeSidebar();
-    }
-  });
-}
-window.addEventListener('DOMContentLoaded', () => {
-  closeSidebar();
 });
 
 window.addEventListener('beforeinstallprompt', (e) => {
