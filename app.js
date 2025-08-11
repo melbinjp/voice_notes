@@ -43,73 +43,124 @@ pasteTestBtn.addEventListener('click', async () => {
   }
 });
 
+// --- New Vosk-based Transcription ---
 let isRecording = false;
-let recognition = null;
-let transcriptText = '';
+let recognizer = null;
+let model = null;
+let audioContext = null;
+let source = null;
+let processor = null;
 
-function supportsWebSpeechAPI() {
-  return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-}
+const VOSK_MODEL_URL = 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip';
 
-function startWebSpeechRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
-  recognition.interimResults = true;
-  recognition.continuous = true;
-  transcriptText = '';
-
-  recognition.onstart = () => {
-    recordingStatus.textContent = 'Recording...';
-    statusBar.textContent = 'Listening (Web Speech API)';
-    transcriptArea.value = '';
-  };
-  recognition.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        transcriptText += event.results[i][0].transcript + ' ';
-      } else {
-        interim += event.results[i][0].transcript;
-      }
-    }
-    transcriptArea.value = transcriptText + interim;
-  };
-  recognition.onerror = (event) => {
-    statusBar.textContent = 'Speech recognition error: ' + event.error;
-    stopRecording();
-  };
-  recognition.onend = () => {
-    recordingStatus.textContent = '';
-    statusBar.textContent = 'Stopped.';
-    isRecording = false;
-    recordBtn.textContent = 'Start Recording';
-  };
-  recognition.start();
-}
-
-function stopRecording() {
-  if (recognition) {
-    recognition.stop();
-    recognition = null;
+async function loadVoskModel() {
+  if (model) return model;
+  statusBar.textContent = 'Loading offline model (40MB)... This may take a minute.';
+  try {
+    model = await Vosk.createModel(VOSK_MODEL_URL);
+    statusBar.textContent = 'Model loaded. Ready to record.';
+    return model;
+  } catch (e) {
+    statusBar.textContent = 'Failed to load model. Please check your internet connection for the first-time setup.';
+    console.error(e);
+    return null;
   }
+}
+
+async function startVoskRecognition() {
+  if (!model) {
+    model = await loadVoskModel();
+    if (!model) return;
+  }
+
+  isRecording = true;
+  recordBtn.textContent = 'Stop Recording';
+  recordingStatus.textContent = 'Recording...';
+  statusBar.textContent = 'Listening (Offline)...';
+
+  recognizer = new model.KaldiRecognizer(16000);
+  let finalTranscript = '';
+  transcriptArea.value = '';
+
+  recognizer.on("result", (message) => {
+    finalTranscript += message.result.text + ' ';
+    transcriptArea.value = finalTranscript;
+  });
+
+  recognizer.on("partialresult", (message) => {
+    transcriptArea.value = finalTranscript + message.result.partial;
+  });
+
+  try {
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        channelCount: 1,
+        sampleRate: 16000
+      },
+    });
+
+    audioContext = new AudioContext();
+    source = audioContext.createMediaStreamSource(mediaStream);
+    processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      if (!isRecording) return;
+      try {
+        recognizer.acceptWaveform(event.inputBuffer);
+      } catch (error) {
+        console.error('acceptWaveform failed', error);
+      }
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+  } catch (error) {
+    console.error('Error getting media stream:', error);
+    statusBar.textContent = 'Error: Could not access microphone.';
+    stopVoskRecognition();
+  }
+}
+
+function stopVoskRecognition() {
+  if (recognizer) {
+    recognizer.remove();
+    recognizer = null;
+  }
+  if (processor) {
+    processor.disconnect();
+    processor = null;
+  }
+  if (source) {
+    source.disconnect();
+    source = null;
+  }
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+
   isRecording = false;
   recordBtn.textContent = 'Start Recording';
   recordingStatus.textContent = '';
+  statusBar.textContent = 'Stopped.';
 }
 
-// Update recordBtn event to support Web Speech API fallback
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    stopRecording();
+    stopVoskRecognition();
   } else {
-    if (supportsWebSpeechAPI() && navigator.onLine) {
-      isRecording = true;
-      recordBtn.textContent = 'Stop Recording';
-      startWebSpeechRecognition();
-    } else {
-      statusBar.textContent = 'Web Speech API not supported or offline.';
-    }
+    await startVoskRecognition();
+  }
+});
+
+// Pre-load the model when the page is idle
+window.addEventListener('DOMContentLoaded', () => {
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(loadVoskModel, { timeout: 3000 });
   }
 });
 
@@ -175,58 +226,92 @@ sendToLLMBtn.addEventListener('click', async () => {
     statusBar.textContent = 'No transcript to summarize.';
     return;
   }
-  statusBar.textContent = 'Sending transcript to backend for summarization...';
   sendToLLMBtn.disabled = true;
+  summary.innerHTML = '';
+
+  // Progressive Enhancement for Summarization
+  if ('Summarizer' in window && typeof Summarizer.availability === 'function') {
+    const availability = await Summarizer.availability();
+    if (availability.state === 'readily-available') {
+      statusBar.textContent = 'Summarizing with built-in AI...';
+      try {
+        const summarizer = await Summarizer.create({
+          type: 'tldr',
+          length: 'short',
+          format: 'plain_text'
+        });
+        const summaryText = await summarizer.summarize(transcript);
+        handleSuccessfulSummary(transcript, { summary: summaryText });
+      } catch (e) {
+        statusBar.textContent = 'Built-in AI failed. Trying fallback...';
+        console.error('Summarizer API error:', e);
+        await fallbackSummarize(transcript);
+      }
+    } else {
+      await fallbackSummarize(transcript);
+    }
+  } else {
+    await fallbackSummarize(transcript);
+  }
+
+  sendToLLMBtn.disabled = false;
+});
+
+async function fallbackSummarize(transcript) {
+  if (!navigator.onLine) {
+    statusBar.textContent = 'Summarization requires an internet connection.';
+    return;
+  }
+  statusBar.textContent = 'Sending transcript to backend for summarization...';
   try {
-    // Use your deployed Cloudflare Worker endpoint
     const endpoint = 'https://llm.melbinjpaulose.workers.dev/';
-    // Send all options for maximum compatibility with the worker
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text: transcript, // worker expects 'text' (or 'transcript')
-        summaryLength: 'default', // always use 'default'
-        summaryType: 'standard', // always use 'standard'
+        text: transcript,
+        summaryLength: 'default',
+        summaryType: 'standard',
         language: 'English',
         title: sessionTitleInput.value.trim() || undefined
       })
     });
     if (!res.ok) throw new Error('Backend error: ' + res.status);
     const data = await res.json();
-    // --- Session title logic ---
-    let sessionTitle = sessionTitleInput.value.trim();
-    if (!sessionTitle) {
-      // Use timestamp as default
-      const now = new Date();
-      sessionTitle = now.toLocaleString();
-      // If summary exists, try to use first sentence as title
-      if (data.summary) {
-        const firstSentence = data.summary.split(/[.!?]/)[0].trim();
-        if (firstSentence && firstSentence.length > 5) {
-          sessionTitle = firstSentence;
-        }
-      }
-      sessionTitleInput.value = sessionTitle;
-    }
-    let html = '';
-    if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
-    if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
-    if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
-    const points = data.keyPoints || data.bullets;
-    if (points && Array.isArray(points)) {
-      html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
-    }
-    summary.innerHTML = html;
-    statusBar.textContent = 'Summary received.';
-    saveToHistory(transcript, data.summary, points, sessionTitle);
-    renderHistory();
+    handleSuccessfulSummary(transcript, data);
   } catch (e) {
     summary.innerHTML = '';
     statusBar.textContent = 'Error: ' + e.message;
   }
-  sendToLLMBtn.disabled = false;
-});
+}
+
+function handleSuccessfulSummary(transcript, summaryData) {
+  const { summary: summaryText, keyPoints } = summaryData;
+  let sessionTitle = sessionTitleInput.value.trim();
+  if (!sessionTitle) {
+    const now = new Date();
+    sessionTitle = now.toLocaleString();
+    if (summaryText) {
+      const firstSentence = summaryText.split(/[.!?]/)[0].trim();
+      if (firstSentence && firstSentence.length > 5) {
+        sessionTitle = firstSentence;
+      }
+    }
+    sessionTitleInput.value = sessionTitle;
+  }
+
+  let html = '';
+  if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
+  if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
+  if (summaryText) html += `<p><b>Summary:</b> ${summaryText}</p>`;
+  if (keyPoints && Array.isArray(keyPoints)) {
+    html += '<ul>' + keyPoints.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
+  }
+  summary.innerHTML = html;
+  statusBar.textContent = 'Summary received.';
+  saveToHistory(transcript, summaryText, keyPoints, sessionTitle);
+  renderHistory();
+}
 
 // --- Feature 4: IndexedDB Storage for History ---
 // Simple IndexedDB wrapper
