@@ -33,6 +33,19 @@
       <div id="summary"></div>
       <button id="copySummaryBtn" title="Copy Summary">Copy</button>
     </div>
+    <div class="settings-section">
+      <h2>Settings</h2>
+      <div class="setting">
+        <span>Offline Transcription Model</span>
+        <span id="transcriptionModelStatus">Not loaded</span>
+        <button id="clearTranscriptionModelBtn">Clear</button>
+      </div>
+      <div class="setting">
+        <span>Offline Summarization Model</span>
+        <span id="summarizationModelStatus">Not loaded</span>
+        <button id="clearSummarizationModelBtn">Clear</button>
+      </div>
+    </div>
     <div class="history-section-bottom">
       <h2>History</h2>
       <ul id="historyList"></ul>
@@ -41,6 +54,7 @@
   <div id="updateBanner" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(25,118,210,0.10);">
     A new version is available. Click to update.
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
   <script src="app.js"></script>
 </body>
 </html>

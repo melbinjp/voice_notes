@@ -1,3 +1,100 @@
+// --- Offline Whisper Class ---
+class OfflineWhisper {
+  constructor(statusCallback) {
+    this.statusCallback = statusCallback;
+    this.model = null;
+    this.loading = false;
+  }
+
+  async load() {
+    if (this.model || this.loading) {
+      return;
+    }
+
+    this.loading = true;
+    this.statusCallback('Loading model...');
+
+    try {
+      this.model = await transformers.pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
+      this.statusCallback('Model loaded successfully.');
+      updateSettingsUI();
+    } catch (error) {
+      this.statusCallback(`Error loading model: ${error}`);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async transcribe(audio) {
+    if (!this.model) {
+      this.statusCallback('Model not loaded.');
+      return;
+    }
+    this.statusCallback('Transcribing...');
+    try {
+      const output = await this.model(audio);
+      this.statusCallback('Transcription complete.');
+      return output.text;
+    } catch (error) {
+      this.statusCallback(`Transcription error: ${error}`);
+    }
+  }
+
+  clear() {
+    this.model = null;
+    updateSettingsUI();
+    this.statusCallback('Transcription model cleared. Please reload the page to download it again.');
+  }
+}
+
+class OfflineSummarizer {
+  constructor(statusCallback) {
+    this.statusCallback = statusCallback;
+    this.model = null;
+    this.loading = false;
+  }
+
+  async load() {
+    if (this.model || this.loading) {
+      return;
+    }
+
+    this.loading = true;
+    this.statusCallback('Loading summarizer...');
+
+    try {
+      this.model = await transformers.pipeline('summarization', 'Xenova/distilbart-cnn-6-6');
+      this.statusCallback('Summarizer loaded successfully.');
+      updateSettingsUI();
+    } catch (error) {
+      this.statusCallback(`Error loading summarizer: ${error}`);
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  async summarize(text) {
+    if (!this.model) {
+      this.statusCallback('Summarizer not loaded.');
+      return;
+    }
+    this.statusCallback('Summarizing...');
+    try {
+      const output = await this.model(text);
+      this.statusCallback('Summarization complete.');
+      return output[0].summary_text;
+    } catch (error) {
+      this.statusCallback(`Summarization error: ${error}`);
+    }
+  }
+
+  clear() {
+    this.model = null;
+    updateSettingsUI();
+    this.statusCallback('Summarizer model cleared. Please reload the page to download it again.');
+  }
+}
+
 // --- Feature 1: Audio Recording & Online Transcription (Web Speech API) ---
 
 const recordBtn = document.getElementById('recordBtn');
@@ -13,6 +110,15 @@ const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
 const copySummaryBtn = document.getElementById('copySummaryBtn');
 const sessionTitleInput = document.getElementById('sessionTitle');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+const transcriptionModelStatus = document.getElementById('transcriptionModelStatus');
+const clearTranscriptionModelBtn = document.getElementById('clearTranscriptionModelBtn');
+const summarizationModelStatus = document.getElementById('summarizationModelStatus');
+const clearSummarizationModelBtn = document.getElementById('clearSummarizationModelBtn');
+
+function updateSettingsUI() {
+  transcriptionModelStatus.textContent = offlineWhisper.model ? 'Loaded' : 'Not loaded';
+  summarizationModelStatus.textContent = offlineSummarizer.model ? 'Loaded' : 'Not loaded';
+}
 
 // Remove summary style/length controls from UI
 const summarizeControls = document.getElementById('summarizeControls');
@@ -43,9 +149,32 @@ pasteTestBtn.addEventListener('click', async () => {
   }
 });
 
+const offlineWhisper = new OfflineWhisper((status) => {
+  statusBar.textContent = status;
+});
+
+const offlineSummarizer = new OfflineSummarizer((status) => {
+  statusBar.textContent = status;
+});
+
+clearTranscriptionModelBtn.addEventListener('click', () => {
+  offlineWhisper.clear();
+});
+
+clearSummarizationModelBtn.addEventListener('click', () => {
+  offlineSummarizer.clear();
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  updateSettingsUI();
+  offlineWhisper.load();
+  offlineSummarizer.load();
+});
+
 let isRecording = false;
 let recognition = null;
-let transcriptText = '';
+let mediaRecorder = null;
+let audioChunks = [];
 
 function supportsWebSpeechAPI() {
   return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
@@ -57,7 +186,6 @@ function startWebSpeechRecognition() {
   recognition.lang = 'en-US';
   recognition.interimResults = true;
   recognition.continuous = true;
-  transcriptText = '';
 
   recognition.onstart = () => {
     recordingStatus.textContent = 'Recording...';
@@ -65,15 +193,16 @@ function startWebSpeechRecognition() {
     transcriptArea.value = '';
   };
   recognition.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
+    let final_transcript = '';
+    let interim_transcript = '';
+    for (let i = 0; i < event.results.length; ++i) {
       if (event.results[i].isFinal) {
-        transcriptText += event.results[i][0].transcript + ' ';
+        final_transcript += event.results[i][0].transcript;
       } else {
-        interim += event.results[i][0].transcript;
+        interim_transcript += event.results[i][0].transcript;
       }
     }
-    transcriptArea.value = transcriptText + interim;
+    transcriptArea.value = final_transcript + interim_transcript;
   };
   recognition.onerror = (event) => {
     statusBar.textContent = 'Speech recognition error: ' + event.error;
@@ -98,17 +227,58 @@ function stopRecording() {
   recordingStatus.textContent = '';
 }
 
+async function startMediaRecorder() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaRecorder = new MediaRecorder(stream);
+  audioChunks = [];
+
+  mediaRecorder.ondataavailable = (event) => {
+    audioChunks.push(event.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+    const transcript = await offlineWhisper.transcribe(audioBlob);
+    if (transcript) {
+      transcriptArea.value = transcript;
+    }
+    stream.getTracks().forEach(track => track.stop());
+  };
+
+  mediaRecorder.start();
+  recordingStatus.textContent = 'Recording...';
+  statusBar.textContent = 'Listening (Offline Whisper)';
+}
+
+function stopMediaRecorder() {
+  if (mediaRecorder) {
+    mediaRecorder.stop();
+    mediaRecorder = null;
+  }
+  isRecording = false;
+  recordBtn.textContent = 'Start Recording';
+  recordingStatus.textContent = '';
+}
+
 // Update recordBtn event to support Web Speech API fallback
 recordBtn.addEventListener('click', async () => {
   if (isRecording) {
-    stopRecording();
+    if (recognition) {
+      stopRecording();
+    } else if (mediaRecorder) {
+      stopMediaRecorder();
+    }
   } else {
-    if (supportsWebSpeechAPI() && navigator.onLine) {
-      isRecording = true;
-      recordBtn.textContent = 'Stop Recording';
+    isRecording = true;
+    recordBtn.textContent = 'Stop Recording';
+    if (offlineWhisper.model) {
+      startMediaRecorder();
+    } else if (supportsWebSpeechAPI()) {
       startWebSpeechRecognition();
     } else {
-      statusBar.textContent = 'Web Speech API not supported or offline.';
+      statusBar.textContent = 'No transcription method available.';
+      isRecording = false;
+      recordBtn.textContent = 'Start Recording';
     }
   }
 });
@@ -175,56 +345,71 @@ sendToLLMBtn.addEventListener('click', async () => {
     statusBar.textContent = 'No transcript to summarize.';
     return;
   }
-  statusBar.textContent = 'Sending transcript to backend for summarization...';
+
   sendToLLMBtn.disabled = true;
-  try {
-    // Use your deployed Cloudflare Worker endpoint
-    const endpoint = 'https://llm.melbinjpaulose.workers.dev/';
-    // Send all options for maximum compatibility with the worker
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: transcript, // worker expects 'text' (or 'transcript')
-        summaryLength: 'default', // always use 'default'
-        summaryType: 'standard', // always use 'standard'
-        language: 'English',
-        title: sessionTitleInput.value.trim() || undefined
-      })
-    });
-    if (!res.ok) throw new Error('Backend error: ' + res.status);
-    const data = await res.json();
-    // --- Session title logic ---
-    let sessionTitle = sessionTitleInput.value.trim();
-    if (!sessionTitle) {
-      // Use timestamp as default
-      const now = new Date();
-      sessionTitle = now.toLocaleString();
-      // If summary exists, try to use first sentence as title
-      if (data.summary) {
-        const firstSentence = data.summary.split(/[.!?]/)[0].trim();
-        if (firstSentence && firstSentence.length > 5) {
-          sessionTitle = firstSentence;
-        }
+
+  if (offlineSummarizer.model) {
+    // Offline summarization
+    const summaryText = await offlineSummarizer.summarize(transcript);
+    if (summaryText) {
+      let sessionTitle = sessionTitleInput.value.trim();
+      if (!sessionTitle) {
+        sessionTitle = new Date().toLocaleString();
+        sessionTitleInput.value = sessionTitle;
       }
-      sessionTitleInput.value = sessionTitle;
+      let html = `<h3>${sessionTitle}</h3><p><b>Transcript:</b> ${transcript}</p><p><b>Summary:</b> ${summaryText}</p>`;
+      summary.innerHTML = html;
+      saveToHistory(transcript, summaryText, null, sessionTitle);
+      renderHistory();
     }
-    let html = '';
-    if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
-    if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
-    if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
-    const points = data.keyPoints || data.bullets;
-    if (points && Array.isArray(points)) {
-      html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
+  } else {
+    // Online summarization
+    statusBar.textContent = 'Sending transcript to backend for summarization...';
+    try {
+      const endpoint = 'https://llm.melbinjpaulose.workers.dev/';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: transcript,
+          summaryLength: 'default',
+          summaryType: 'standard',
+          language: 'English',
+          title: sessionTitleInput.value.trim() || undefined
+        })
+      });
+      if (!res.ok) throw new Error('Backend error: ' + res.status);
+      const data = await res.json();
+      let sessionTitle = sessionTitleInput.value.trim();
+      if (!sessionTitle) {
+        const now = new Date();
+        sessionTitle = now.toLocaleString();
+        if (data.summary) {
+          const firstSentence = data.summary.split(/[.!?]/)[0].trim();
+          if (firstSentence && firstSentence.length > 5) {
+            sessionTitle = firstSentence;
+          }
+        }
+        sessionTitleInput.value = sessionTitle;
+      }
+      let html = '';
+      if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
+      if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
+      if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
+      const points = data.keyPoints || data.bullets;
+      if (points && Array.isArray(points)) {
+        html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
+      }
+      summary.innerHTML = html;
+      statusBar.textContent = 'Summary received.';
+      saveToHistory(transcript, data.summary, points, sessionTitle);
+      renderHistory();
+    } catch (e) {
+      summary.innerHTML = '';
+      statusBar.textContent = 'Error: ' + e.message;
     }
-    summary.innerHTML = html;
-    statusBar.textContent = 'Summary received.';
-    saveToHistory(transcript, data.summary, points, sessionTitle);
-    renderHistory();
-  } catch (e) {
-    summary.innerHTML = '';
-    statusBar.textContent = 'Error: ' + e.message;
   }
+
   sendToLLMBtn.disabled = false;
 });
 
@@ -563,6 +748,14 @@ if ('serviceWorker' in navigator) {
 
 // On page load, show history
 window.addEventListener('DOMContentLoaded', renderHistory);
+
+window.addEventListener('online', () => {
+  statusBar.textContent = 'You are back online.';
+});
+
+window.addEventListener('offline', () => {
+  statusBar.textContent = 'You are offline. Some features may not be available.';
+});
 
 // This file will handle:
 // - Audio recording (MediaRecorder)
