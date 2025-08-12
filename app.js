@@ -134,8 +134,10 @@ let selectedSummaryType = 'standard';
 let selectedSummaryLength = 'default';
 const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
 const copySummaryBtn = document.getElementById('copySummaryBtn');
+const copyMarkdownBtn = document.getElementById('copyMarkdownBtn');
 const sessionTitleInput = document.getElementById('sessionTitle');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+let lastSummaryMarkdown = '';
 
 // --- Status Card Elements and Logic ---
 const statusCardHeader = document.getElementById('statusCardHeader');
@@ -151,6 +153,7 @@ const clearSummarizationModelBtn = document.getElementById('clearSummarizationMo
 const uploadInput = document.getElementById('uploadInput');
 const transcriptionModelSelect = document.getElementById('transcriptionModelSelect');
 const summarizationModelSelect = document.getElementById('summarizationModelSelect');
+const summaryStyleSelect = document.getElementById('summaryStyleSelect');
 
 function formatBytes(bytes, decimals = 2) {
   if (bytes === 0) return '0 Bytes';
@@ -422,7 +425,13 @@ if (copyTranscriptBtn) {
 if (copySummaryBtn) {
   copySummaryBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(summary.textContent || summary.innerText);
-    statusBar.textContent = 'Summary copied!';
+    statusBar.textContent = 'Copied as plain text!';
+  });
+}
+if (copyMarkdownBtn) {
+  copyMarkdownBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(lastSummaryMarkdown);
+    statusBar.textContent = 'Copied as Markdown!';
   });
 }
 // Clear history
@@ -471,16 +480,27 @@ sendToLLMBtn.addEventListener('click', async () => {
 
   if (offlineSummarizer.model) {
     // Offline summarization
-    const summaryText = await offlineSummarizer.summarize(transcript);
+    const style = summaryStyleSelect.value;
+    let instruction = '';
+    if (style === 'bullets') {
+      instruction = 'Generate a concise summary of the following text as a markdown list of bullet points:';
+    } else if (style === 'action-items') {
+      instruction = 'Extract the action items from the following text and present them as a markdown list:';
+    } else {
+      instruction = 'Summarize the following text:';
+    }
+    const fullPrompt = `${instruction}\n\n${transcript}`;
+
+    const summaryText = await offlineSummarizer.summarize(fullPrompt);
     if (summaryText) {
       let sessionTitle = sessionTitleInput.value.trim();
       if (!sessionTitle) {
         sessionTitle = new Date().toLocaleString();
         sessionTitleInput.value = sessionTitle;
       }
-      let html = `<h3>${sessionTitle}</h3><p><b>Transcript:</b> ${transcript}</p><p><b>Summary:</b> ${summaryText}</p>`;
-      summary.innerHTML = html;
-      saveToHistory(transcript, summaryText, null, sessionTitle);
+      lastSummaryMarkdown = summaryText;
+      summary.innerHTML = marked.parse(summaryText);
+      saveToHistory(transcript, lastSummaryMarkdown, null, sessionTitle);
       renderHistory();
     }
   } else {
@@ -513,17 +533,14 @@ sendToLLMBtn.addEventListener('click', async () => {
         }
         sessionTitleInput.value = sessionTitle;
       }
-      let html = '';
-      if (sessionTitle) html += `<h3>${sessionTitle}</h3>`;
-      if (transcript) html += `<p><b>Transcript:</b> ${transcript}</p>`;
-      if (data.summary) html += `<p><b>Summary:</b> ${data.summary}</p>`;
-      const points = data.keyPoints || data.bullets;
-      if (points && Array.isArray(points)) {
-        html += '<ul>' + points.map(pt => `<li>${pt}</li>`).join('') + '</ul>';
+      lastSummaryMarkdown = data.summary;
+      if (data.summary) {
+        summary.innerHTML = marked.parse(data.summary);
+      } else {
+        summary.innerHTML = '';
       }
-      summary.innerHTML = html;
       statusBar.textContent = 'Summary received.';
-      saveToHistory(transcript, data.summary, points, sessionTitle);
+      saveToHistory(transcript, lastSummaryMarkdown, data.keyPoints, sessionTitle);
       renderHistory();
     } catch (e) {
       summary.innerHTML = '';
@@ -589,7 +606,7 @@ async function renderHistory() {
   list.innerHTML = items.map((item, idx) => {
     const safeTitle = item.title ? item.title.replace(/</g, '&lt;').replace(/>/g, '&gt;') : 'Untitled';
     const transcript = item.transcript ? item.transcript.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
-    const summary = item.summary ? item.summary.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+    const summary = item.summary ? marked.parse(item.summary) : '';
     const keyPoints = item.keyPoints && Array.isArray(item.keyPoints) && item.keyPoints.length
       ? '<ul>' + item.keyPoints.map(pt => `<li>${pt.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('') + '</ul>'
       : '';
