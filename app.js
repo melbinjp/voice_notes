@@ -11,7 +11,7 @@ class OfflineWhisper {
     this.loading = false;
   }
 
-  async load() {
+  async load(progressCallback) {
     if (this.model || this.loading) {
       return;
     }
@@ -20,7 +20,9 @@ class OfflineWhisper {
     this.statusCallback('Loading model...');
 
     try {
-      this.model = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
+      this.model = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+        progress_callback: progressCallback,
+      });
       this.statusCallback('Model loaded successfully.');
       updateSettingsUI();
     } catch (error) {
@@ -72,7 +74,7 @@ class OfflineSummarizer {
     this.loading = false;
   }
 
-  async load() {
+  async load(progressCallback) {
     if (this.model || this.loading) {
       return;
     }
@@ -81,7 +83,9 @@ class OfflineSummarizer {
     this.statusCallback('Loading summarizer...');
 
     try {
-      this.model = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6');
+      this.model = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6', {
+        progress_callback: progressCallback,
+      });
       this.statusCallback('Summarizer loaded successfully.');
       updateSettingsUI();
     } catch (error) {
@@ -129,67 +133,93 @@ const copySummaryBtn = document.getElementById('copySummaryBtn');
 const sessionTitleInput = document.getElementById('sessionTitle');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
-// --- Modal Elements and Logic ---
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsModal = document.getElementById('settingsModal');
-const closeModalBtn = document.getElementById('closeModalBtn');
-const modalTranscriptionModelStatus = document.getElementById('modalTranscriptionModelStatus');
+// --- Status Card Elements and Logic ---
+const statusCardHeader = document.getElementById('statusCardHeader');
+const statusCardContent = document.getElementById('statusCardContent');
+const transcriptionModelStatus = document.getElementById('transcriptionModelStatus');
+const summarizationModelStatus = document.getElementById('summarizationModelStatus');
+const transcriptionProgress = document.getElementById('transcriptionProgress');
+const summarizationProgress = document.getElementById('summarizationProgress');
 const downloadTranscriptionModelBtn = document.getElementById('downloadTranscriptionModelBtn');
-const clearTranscriptionModelBtnModal = document.getElementById('clearTranscriptionModelBtnModal');
-const modalSummarizationModelStatus = document.getElementById('modalSummarizationModelStatus');
+const clearTranscriptionModelBtn = document.getElementById('clearTranscriptionModelBtn');
 const downloadSummarizationModelBtn = document.getElementById('downloadSummarizationModelBtn');
-const clearSummarizationModelBtnModal = document.getElementById('clearSummarizationModelBtnModal');
+const clearSummarizationModelBtn = document.getElementById('clearSummarizationModelBtn');
+
+function formatBytes(bytes, decimals = 2) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
 
 function updateSettingsUI() {
   const whisperLoaded = !!offlineWhisper.model;
   const summarizerLoaded = !!offlineSummarizer.model;
 
-  modalTranscriptionModelStatus.textContent = whisperLoaded ? 'Loaded' : 'Not Loaded';
+  transcriptionModelStatus.textContent = whisperLoaded ? 'Loaded' : 'Not Loaded';
   downloadTranscriptionModelBtn.style.display = whisperLoaded ? 'none' : 'inline-block';
-  clearTranscriptionModelBtnModal.style.display = whisperLoaded ? 'inline-block' : 'none';
+  clearTranscriptionModelBtn.style.display = whisperLoaded ? 'inline-block' : 'none';
 
-  modalSummarizationModelStatus.textContent = summarizerLoaded ? 'Loaded' : 'Not Loaded';
+  summarizationModelStatus.textContent = summarizerLoaded ? 'Loaded' : 'Not Loaded';
   downloadSummarizationModelBtn.style.display = summarizerLoaded ? 'none' : 'inline-block';
-  clearSummarizationModelBtnModal.style.display = summarizerLoaded ? 'inline-block' : 'none';
+  clearSummarizationModelBtn.style.display = summarizerLoaded ? 'inline-block' : 'none';
 }
 
-settingsBtn.addEventListener('click', () => {
-  settingsModal.style.display = 'flex';
-});
-
-closeModalBtn.addEventListener('click', () => {
-  settingsModal.style.display = 'none';
-});
-
-window.addEventListener('click', (event) => {
-  if (event.target === settingsModal) {
-    settingsModal.style.display = 'none';
-  }
+statusCardHeader.addEventListener('click', () => {
+  const isExpanded = statusCardHeader.getAttribute('aria-expanded') === 'true';
+  statusCardHeader.setAttribute('aria-expanded', String(!isExpanded));
+  statusCardContent.style.display = isExpanded ? 'none' : 'block';
 });
 
 downloadTranscriptionModelBtn.addEventListener('click', () => {
   downloadTranscriptionModelBtn.textContent = 'Loading...';
   downloadTranscriptionModelBtn.disabled = true;
-  offlineWhisper.load().finally(() => {
+  transcriptionProgress.textContent = '';
+
+  const progressCallback = (progress) => {
+    if (progress.status === 'progress') {
+      const loaded = formatBytes(progress.loaded);
+      const total = formatBytes(progress.total);
+      transcriptionProgress.textContent = `(${loaded} / ${total})`;
+    }
+  };
+
+  offlineWhisper.load(progressCallback).finally(() => {
     downloadTranscriptionModelBtn.textContent = 'Download';
     downloadTranscriptionModelBtn.disabled = false;
+    transcriptionProgress.textContent = '';
+    updateSettingsUI();
   });
 });
 
 downloadSummarizationModelBtn.addEventListener('click', () => {
   downloadSummarizationModelBtn.textContent = 'Loading...';
   downloadSummarizationModelBtn.disabled = true;
-  offlineSummarizer.load().finally(() => {
+  summarizationProgress.textContent = '';
+
+  const progressCallback = (progress) => {
+    if (progress.status === 'progress') {
+      const loaded = formatBytes(progress.loaded);
+      const total = formatBytes(progress.total);
+      summarizationProgress.textContent = `(${loaded} / ${total})`;
+    }
+  };
+
+  offlineSummarizer.load(progressCallback).finally(() => {
     downloadSummarizationModelBtn.textContent = 'Download';
     downloadSummarizationModelBtn.disabled = false;
+    summarizationProgress.textContent = '';
+    updateSettingsUI();
   });
 });
 
-clearTranscriptionModelBtnModal.addEventListener('click', () => {
+clearTranscriptionModelBtn.addEventListener('click', () => {
   offlineWhisper.clear();
 });
 
-clearSummarizationModelBtnModal.addEventListener('click', () => {
+clearSummarizationModelBtn.addEventListener('click', () => {
   offlineSummarizer.clear();
 });
 
