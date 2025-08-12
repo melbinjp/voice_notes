@@ -31,14 +31,27 @@ class OfflineWhisper {
     }
   }
 
-  async transcribe(audio) {
+  async transcribe(audioBlob) {
     if (!this.model) {
       this.statusCallback('Model not loaded.');
       return;
     }
     this.statusCallback('Transcribing...');
     try {
-      const output = await this.model(audio);
+      // 1. Read the Blob into an ArrayBuffer
+      const arrayBuffer = await audioBlob.arrayBuffer();
+
+      // 2. Decode the ArrayBuffer into an AudioBuffer
+      const audioContext = new AudioContext({
+        sampleRate: 16000,
+      });
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+      // 3. Get the Float32Array from the AudioBuffer
+      const audioData = audioBuffer.getChannelData(0);
+
+      // 4. Pass the Float32Array to the model
+      const output = await this.model(audioData);
       this.statusCallback('Transcription complete.');
       return output.text;
     } catch (error) {
