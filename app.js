@@ -110,15 +110,70 @@ const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
 const copySummaryBtn = document.getElementById('copySummaryBtn');
 const sessionTitleInput = document.getElementById('sessionTitle');
 const clearHistoryBtn = document.getElementById('clearHistoryBtn');
-const transcriptionModelStatus = document.getElementById('transcriptionModelStatus');
-const clearTranscriptionModelBtn = document.getElementById('clearTranscriptionModelBtn');
-const summarizationModelStatus = document.getElementById('summarizationModelStatus');
-const clearSummarizationModelBtn = document.getElementById('clearSummarizationModelBtn');
+
+// --- Modal Elements and Logic ---
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const closeModalBtn = document.getElementById('closeModalBtn');
+const modalTranscriptionModelStatus = document.getElementById('modalTranscriptionModelStatus');
+const downloadTranscriptionModelBtn = document.getElementById('downloadTranscriptionModelBtn');
+const clearTranscriptionModelBtnModal = document.getElementById('clearTranscriptionModelBtnModal');
+const modalSummarizationModelStatus = document.getElementById('modalSummarizationModelStatus');
+const downloadSummarizationModelBtn = document.getElementById('downloadSummarizationModelBtn');
+const clearSummarizationModelBtnModal = document.getElementById('clearSummarizationModelBtnModal');
 
 function updateSettingsUI() {
-  transcriptionModelStatus.textContent = offlineWhisper.model ? 'Loaded' : 'Not loaded';
-  summarizationModelStatus.textContent = offlineSummarizer.model ? 'Loaded' : 'Not loaded';
+  const whisperLoaded = !!offlineWhisper.model;
+  const summarizerLoaded = !!offlineSummarizer.model;
+
+  modalTranscriptionModelStatus.textContent = whisperLoaded ? 'Loaded' : 'Not Loaded';
+  downloadTranscriptionModelBtn.style.display = whisperLoaded ? 'none' : 'inline-block';
+  clearTranscriptionModelBtnModal.style.display = whisperLoaded ? 'inline-block' : 'none';
+
+  modalSummarizationModelStatus.textContent = summarizerLoaded ? 'Loaded' : 'Not Loaded';
+  downloadSummarizationModelBtn.style.display = summarizerLoaded ? 'none' : 'inline-block';
+  clearSummarizationModelBtnModal.style.display = summarizerLoaded ? 'inline-block' : 'none';
 }
+
+settingsBtn.addEventListener('click', () => {
+  settingsModal.style.display = 'flex';
+});
+
+closeModalBtn.addEventListener('click', () => {
+  settingsModal.style.display = 'none';
+});
+
+window.addEventListener('click', (event) => {
+  if (event.target === settingsModal) {
+    settingsModal.style.display = 'none';
+  }
+});
+
+downloadTranscriptionModelBtn.addEventListener('click', () => {
+  downloadTranscriptionModelBtn.textContent = 'Loading...';
+  downloadTranscriptionModelBtn.disabled = true;
+  offlineWhisper.load().finally(() => {
+    downloadTranscriptionModelBtn.textContent = 'Download';
+    downloadTranscriptionModelBtn.disabled = false;
+  });
+});
+
+downloadSummarizationModelBtn.addEventListener('click', () => {
+  downloadSummarizationModelBtn.textContent = 'Loading...';
+  downloadSummarizationModelBtn.disabled = true;
+  offlineSummarizer.load().finally(() => {
+    downloadSummarizationModelBtn.textContent = 'Download';
+    downloadSummarizationModelBtn.disabled = false;
+  });
+});
+
+clearTranscriptionModelBtnModal.addEventListener('click', () => {
+  offlineWhisper.clear();
+});
+
+clearSummarizationModelBtnModal.addEventListener('click', () => {
+  offlineSummarizer.clear();
+});
 
 // Remove summary style/length controls from UI
 const summarizeControls = document.getElementById('summarizeControls');
@@ -146,18 +201,8 @@ const offlineSummarizer = new OfflineSummarizer((status) => {
   statusBar.textContent = status;
 });
 
-clearTranscriptionModelBtn.addEventListener('click', () => {
-  offlineWhisper.clear();
-});
-
-clearSummarizationModelBtn.addEventListener('click', () => {
-  offlineSummarizer.clear();
-});
-
 window.addEventListener('DOMContentLoaded', () => {
   updateSettingsUI();
-  offlineWhisper.load();
-  offlineSummarizer.load();
 });
 
 let isRecording = false;

@@ -17,45 +17,24 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // We only want to cache GET requests.
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // Strategy: Network-first for navigation requests, to ensure users get the latest HTML.
-      if (event.request.mode === 'navigate') {
-        return fetch(event.request)
-          .then((networkResponse) => {
-            // Clone the response to put it in the cache.
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseClone);
-            });
-            return networkResponse;
-          })
-          .catch(() => {
-            // If the network fails, serve the cached version if available.
-            return cachedResponse || caches.match('index.html');
-          });
-      }
-
-      // Strategy: Cache-first for all other requests (CSS, JS, images, models).
-      // This provides the best performance and offline capability.
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      // If not in cache, fetch from the network.
-      return fetch(event.request).then((networkResponse) => {
-        // Don't cache opaque responses (e.g., from some CDNs without CORS) or errors.
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type === 'opaque') {
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.match(event.request).then((response) => {
+        // Return cached response if found.
+        // Otherwise, fetch from network, cache it, and return the response.
+        const fetchPromise = fetch(event.request).then((networkResponse) => {
+          // We need to clone the response to cache it and return it.
+          cache.put(event.request, networkResponse.clone());
           return networkResponse;
-        }
-
-        // Clone the response to put it in the cache.
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
         });
 
-        return networkResponse;
+        // Return the cached response or the network promise.
+        return response || fetchPromise;
       });
     }),
   );
