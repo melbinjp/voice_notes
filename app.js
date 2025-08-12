@@ -54,7 +54,10 @@ class OfflineWhisper {
       const audioData = audioBuffer.getChannelData(0);
 
       // 4. Pass the Float32Array to the model
-      const output = await this.model(audioData);
+      const output = await this.model(audioData, {
+        chunk_length_s: 30,
+        stride_length_s: 5,
+      });
       this.statusCallback('Transcription complete.');
       return output.text;
     } catch (error) {
