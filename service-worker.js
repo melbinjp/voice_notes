@@ -1,11 +1,13 @@
 // Service Worker for PWA offline support
 const CACHE_NAME = 'voice-notes-cache-v1';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/style.css',
-  '/app.js',
-  '/manifest.json',
+  './',
+  'index.html',
+  'style.css',
+  'app.js',
+  'manifest.json',
+  'icon-192.png',
+  'icon-512.png'
 ];
 
 self.addEventListener('install', event => {
