@@ -1,7 +1,7 @@
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// Configure the library to use the Hugging Face Hub
-env.remoteHost = 'https://huggingface.co';
+// Do not look for models locally
+env.allowLocalModels = false;
 
 // --- Offline Whisper Class ---
 class OfflineWhisper {
