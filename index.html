@@ -15,6 +15,10 @@
     <h1>Voice Notes</h1>
     <div class="recorder-controls">
       <button id="recordBtn">Start Recording</button>
+      <label class="upload-btn-wrapper">
+        Upload Audio
+        <input type="file" id="uploadInput" accept="audio/*" style="display: none;">
+      </label>
       <span id="recordingStatus"></span>
     </div>
     <div class="session-title-section">
@@ -48,7 +52,11 @@
         <div class="model-status-item">
           <div>
             <strong>Transcription (Whisper)</strong>
-            <span id="transcriptionModelName" class="model-name">Xenova/whisper-tiny.en</span>
+            <select id="transcriptionModelSelect" class="model-select">
+              <option value="Xenova/whisper-tiny.en">Tiny (English, ~75MB)</option>
+              <option value="Xenova/whisper-base.en">Base (English, ~142MB)</option>
+              <option value="Xenova/whisper-small.en">Small (English, ~466MB)</option>
+            </select>
           </div>
           <div class="status-and-progress">
             <span id="transcriptionModelStatus">Not Loaded</span>
@@ -62,7 +70,9 @@
         <div class="model-status-item">
           <div>
             <strong>Summarization (DistilBART)</strong>
-            <span id="summarizationModelName" class="model-name">Xenova/distilbart-cnn-6-6</span>
+            <select id="summarizationModelSelect" class="model-select">
+              <option value="Xenova/distilbart-cnn-6-6">DistilBART (~250MB)</option>
+            </select>
           </div>
           <div class="status-and-progress">
             <span id="summarizationModelStatus">Not Loaded</span>

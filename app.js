@@ -8,21 +8,23 @@ class OfflineWhisper {
   constructor(statusCallback) {
     this.statusCallback = statusCallback;
     this.model = null;
+    this.modelName = null;
     this.loading = false;
   }
 
-  async load(progressCallback) {
+  async load(modelName, progressCallback) {
     if (this.model || this.loading) {
       return;
     }
 
     this.loading = true;
-    this.statusCallback('Loading model...');
+    this.statusCallback(`Loading model: ${modelName}`);
 
     try {
-      this.model = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+      this.model = await pipeline('automatic-speech-recognition', modelName, {
         progress_callback: progressCallback,
       });
+      this.modelName = modelName;
       this.statusCallback('Model loaded successfully.');
       updateSettingsUI();
     } catch (error) {
@@ -71,21 +73,23 @@ class OfflineSummarizer {
   constructor(statusCallback) {
     this.statusCallback = statusCallback;
     this.model = null;
+    this.modelName = null;
     this.loading = false;
   }
 
-  async load(progressCallback) {
+  async load(modelName, progressCallback) {
     if (this.model || this.loading) {
       return;
     }
 
     this.loading = true;
-    this.statusCallback('Loading summarizer...');
+    this.statusCallback(`Loading summarizer: ${modelName}`);
 
     try {
-      this.model = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6', {
+      this.model = await pipeline('summarization', modelName, {
         progress_callback: progressCallback,
       });
+      this.modelName = modelName;
       this.statusCallback('Summarizer loaded successfully.');
       updateSettingsUI();
     } catch (error) {
@@ -144,6 +148,9 @@ const downloadTranscriptionModelBtn = document.getElementById('downloadTranscrip
 const clearTranscriptionModelBtn = document.getElementById('clearTranscriptionModelBtn');
 const downloadSummarizationModelBtn = document.getElementById('downloadSummarizationModelBtn');
 const clearSummarizationModelBtn = document.getElementById('clearSummarizationModelBtn');
+const uploadInput = document.getElementById('uploadInput');
+const transcriptionModelSelect = document.getElementById('transcriptionModelSelect');
+const summarizationModelSelect = document.getElementById('summarizationModelSelect');
 
 function formatBytes(bytes, decimals = 2) {
   if (bytes === 0) return '0 Bytes';
@@ -158,11 +165,15 @@ function updateSettingsUI() {
   const whisperLoaded = !!offlineWhisper.model;
   const summarizerLoaded = !!offlineSummarizer.model;
 
-  transcriptionModelStatus.textContent = whisperLoaded ? 'Loaded' : 'Not Loaded';
+  // Transcription Model UI
+  transcriptionModelStatus.textContent = whisperLoaded ? `Loaded: ${offlineWhisper.modelName}` : 'Not Loaded';
+  transcriptionModelSelect.disabled = whisperLoaded;
   downloadTranscriptionModelBtn.style.display = whisperLoaded ? 'none' : 'inline-block';
   clearTranscriptionModelBtn.style.display = whisperLoaded ? 'inline-block' : 'none';
 
-  summarizationModelStatus.textContent = summarizerLoaded ? 'Loaded' : 'Not Loaded';
+  // Summarization Model UI
+  summarizationModelStatus.textContent = summarizerLoaded ? `Loaded: ${offlineSummarizer.modelName}` : 'Not Loaded';
+  summarizationModelSelect.disabled = summarizerLoaded;
   downloadSummarizationModelBtn.style.display = summarizerLoaded ? 'none' : 'inline-block';
   clearSummarizationModelBtn.style.display = summarizerLoaded ? 'inline-block' : 'none';
 }
@@ -177,6 +188,7 @@ downloadTranscriptionModelBtn.addEventListener('click', () => {
   downloadTranscriptionModelBtn.textContent = 'Loading...';
   downloadTranscriptionModelBtn.disabled = true;
   transcriptionProgress.textContent = '';
+  const modelName = transcriptionModelSelect.value;
 
   const progressCallback = (progress) => {
     if (progress.status === 'progress') {
@@ -186,7 +198,7 @@ downloadTranscriptionModelBtn.addEventListener('click', () => {
     }
   };
 
-  offlineWhisper.load(progressCallback).finally(() => {
+  offlineWhisper.load(modelName, progressCallback).finally(() => {
     downloadTranscriptionModelBtn.textContent = 'Download';
     downloadTranscriptionModelBtn.disabled = false;
     transcriptionProgress.textContent = '';
@@ -198,6 +210,7 @@ downloadSummarizationModelBtn.addEventListener('click', () => {
   downloadSummarizationModelBtn.textContent = 'Loading...';
   downloadSummarizationModelBtn.disabled = true;
   summarizationProgress.textContent = '';
+  const modelName = summarizationModelSelect.value;
 
   const progressCallback = (progress) => {
     if (progress.status === 'progress') {
@@ -207,7 +220,7 @@ downloadSummarizationModelBtn.addEventListener('click', () => {
     }
   };
 
-  offlineSummarizer.load(progressCallback).finally(() => {
+  offlineSummarizer.load(modelName, progressCallback).finally(() => {
     downloadSummarizationModelBtn.textContent = 'Download';
     downloadSummarizationModelBtn.disabled = false;
     summarizationProgress.textContent = '';
@@ -247,6 +260,32 @@ const offlineWhisper = new OfflineWhisper((status) => {
 
 const offlineSummarizer = new OfflineSummarizer((status) => {
   statusBar.textContent = status;
+});
+
+uploadInput.addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  if (!offlineWhisper.model) {
+    statusBar.textContent = 'Please download the transcription model from the status card below first.';
+    return;
+  }
+
+  transcriptArea.value = '';
+  statusBar.textContent = `Transcribing ${file.name}...`;
+
+  const transcript = await offlineWhisper.transcribe(file);
+  if (transcript) {
+    transcriptArea.value = transcript;
+    statusBar.textContent = 'File transcription complete.';
+  } else {
+    statusBar.textContent = 'Could not transcribe the audio file.';
+  }
+
+  // Reset the input so the user can upload the same file again
+  uploadInput.value = '';
 });
 
 window.addEventListener('DOMContentLoaded', () => {
