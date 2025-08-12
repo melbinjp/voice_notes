@@ -2,7 +2,6 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers
 
 // Configure the library to use the Hugging Face Hub
 env.remoteHost = 'https://huggingface.co';
-env.remotePathTemplate = '{model}/resolve/{revision}/{path}';
 
 // --- Offline Whisper Class ---
 class OfflineWhisper {
