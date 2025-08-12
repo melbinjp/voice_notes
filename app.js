@@ -1,3 +1,5 @@
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
 // --- Offline Whisper Class ---
 class OfflineWhisper {
   constructor(statusCallback) {
@@ -15,7 +17,7 @@ class OfflineWhisper {
     this.statusCallback('Loading model...');
 
     try {
-      this.model = await transformers.pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
+      this.model = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
       this.statusCallback('Model loaded successfully.');
       updateSettingsUI();
     } catch (error) {
@@ -63,7 +65,7 @@ class OfflineSummarizer {
     this.statusCallback('Loading summarizer...');
 
     try {
-      this.model = await transformers.pipeline('summarization', 'Xenova/distilbart-cnn-6-6');
+      this.model = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6');
       this.statusCallback('Summarizer loaded successfully.');
       updateSettingsUI();
     } catch (error) {
