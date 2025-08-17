@@ -59,9 +59,24 @@
           <div>
             <strong>Transcription (Whisper)</strong>
             <select id="transcriptionModelSelect" class="model-select">
-              <option value="Xenova/whisper-tiny.en">Tiny (Size: ~75MB, RAM: ~200MB)</option>
-              <option value="Xenova/whisper-base.en">Base (Size: ~142MB, RAM: ~400MB)</option>
-              <option value="Xenova/whisper-small.en">Small (Size: ~466MB, RAM: ~1GB)</option>
+              <option value="Xenova/whisper-tiny.en">Tiny (English-only, ~75MB)</option>
+              <option value="Xenova/whisper-base.en">Base (English-only, ~142MB)</option>
+              <option value="Xenova/whisper-small.en">Small (English-only, ~466MB)</option>
+              <option value="Xenova/whisper-tiny">Tiny (Multilingual, ~77MB)</option>
+              <option value="Xenova/whisper-base">Base (Multilingual, ~148MB)</option>
+            </select>
+            <select id="languageSelect" class="model-select">
+              <option value="auto">Auto-Detect</option>
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ru">Russian</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
             </select>
           </div>
           <div class="status-and-progress">
