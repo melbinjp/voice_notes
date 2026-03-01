@@ -6,7 +6,7 @@ class ModularRecognitionManager {
     this.currentEngine = null;
     this.isRecording = false;
     this.callbacks = {};
-    
+
     console.log('Modular recognition manager initialized');
   }
 
@@ -14,17 +14,17 @@ class ModularRecognitionManager {
   async initializeEngines() {
     try {
       console.log('Initializing engines from module registry...');
-      
+
       // Get all available modules
       const availableModules = moduleRegistry.getAvailableModules();
       console.log(`Found ${availableModules.length} registered modules`);
-      
+
       // Check availability for each module
       for (const moduleInfo of availableModules) {
         const isAvailable = await moduleRegistry.isModuleAvailable(moduleInfo.id);
         console.log(`Module ${moduleInfo.name} (${moduleInfo.id}): ${isAvailable ? 'Available' : 'Not available'}`);
       }
-      
+
       return availableModules;
     } catch (error) {
       console.error('Error initializing engines:', error);
@@ -36,14 +36,14 @@ class ModularRecognitionManager {
   async getAvailableEngines() {
     const availableModules = moduleRegistry.getAvailableModules();
     const engines = [];
-    
+
     for (const moduleInfo of availableModules) {
       const isAvailable = await moduleRegistry.isModuleAvailable(moduleInfo.id);
       if (isAvailable) {
         engines.push(moduleInfo);
       }
     }
-    
+
     return engines;
   }
 
@@ -63,10 +63,10 @@ class ModularRecognitionManager {
 
       // Create new engine instance
       this.currentEngine = await moduleRegistry.createModule(engineId);
-      
+
       // Initialize the engine
       await this.currentEngine.initialize();
-      
+
       console.log(`Switched to engine: ${this.currentEngine.name} (${engineId})`);
       return this.currentEngine;
     } catch (error) {
@@ -88,13 +88,13 @@ class ModularRecognitionManager {
     try {
       this.isRecording = true;
       this.callbacks = { onResult, onError, onStatus };
-      
+
       const success = await this.currentEngine.start(onResult, onError, onStatus);
       if (!success) {
         this.isRecording = false;
         throw new Error(`Failed to start ${this.currentEngine.name}`);
       }
-      
+
       return true;
     } catch (error) {
       this.isRecording = false;
@@ -119,7 +119,7 @@ class ModularRecognitionManager {
   }
 
   // Transcribe file
-  async transcribeFile(file) {
+  async transcribeFile(file, onProgress) {
     if (!this.currentEngine) {
       throw new Error('No engine selected');
     }
@@ -131,7 +131,11 @@ class ModularRecognitionManager {
     }
 
     try {
-      return await this.currentEngine.transcribeFile(file);
+      if (this.currentEngine.transcribeFile.length >= 2) {
+        return await this.currentEngine.transcribeFile(file, onProgress);
+      } else {
+        return await this.currentEngine.transcribeFile(file);
+      }
     } catch (error) {
       console.error('File transcription failed:', error);
       throw error;
@@ -156,7 +160,7 @@ class ModularRecognitionManager {
   // Check if engine supports specific feature
   supportsFeature(feature) {
     if (!this.currentEngine) return false;
-    
+
     const engineInfo = this.currentEngine.getInfo();
     return engineInfo.features.includes(feature);
   }
@@ -237,11 +241,11 @@ class ModularRecognitionManager {
       const engineInfo = moduleRegistry.getModuleMetadata(engineId);
       return engineInfo ? engineInfo.languages : [];
     }
-    
+
     if (this.currentEngine) {
       return this.currentEngine.getSupportedLanguages();
     }
-    
+
     return [];
   }
 
@@ -289,7 +293,7 @@ class ModularRecognitionManager {
 
       this.currentEngine = null;
       moduleRegistry.clearLoadedModules();
-      
+
       console.log('Modular recognition manager cleaned up');
     } catch (error) {
       console.error('Error cleaning up recognition manager:', error);

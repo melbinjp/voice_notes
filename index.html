@@ -56,15 +56,38 @@
           <button id="transcribeFileBtn" class="main-action" disabled>🎵 Transcribe File</button>
           <div id="fileInfo" class="file-info"></div>
         </div>
+        
+        <!-- Audio Player (Hidden by default) -->
+        <audio id="audioPlayback" controls class="audio-player" style="display: none; width: 100%; margin-top: 15px; border-radius: 8px;"></audio>
+        
+        <!-- Progress Container (Hidden by default) -->
+        <div id="progressContainer" class="progress-container" style="display: none; margin-top: 15px;">
+          <div class="progress-label" id="progressLabel">Processing...</div>
+          <div class="progress-bar-bg">
+            <div id="progressBar" class="progress-bar-fill"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Transcript Section -->
       <div class="transcript-section">
         <label for="transcript" class="transcript-label">📝 Transcript</label>
+        
+        <!-- Tab Controls for Transcript View -->
+        <div class="transcript-tabs">
+          <button id="tabText" class="tab-btn active">Raw Text</button>
+          <button id="tabTimed" class="tab-btn">Interactive (Timed)</button>
+        </div>
+
         <textarea id="transcript" class="transcript-area" placeholder="Your transcribed text will appear here..."></textarea>
+        
+        <div id="timedTranscript" class="transcript-area timed-transcript" style="display: none; overflow-y: auto;">
+          <div class="timed-empty">No interactive transcript available.</div>
+        </div>
+
         <div class="transcript-actions">
           <button id="copyTranscriptBtn" class="main-action">📋 Copy</button>
-          <button id="sendToLLMBtn" class="main-action">🤖 Summarize</button>
+          <button id="sendToLLMBtn" class="main-action">🤖 Summarize (Offline)</button>
         </div>
       </div>
 

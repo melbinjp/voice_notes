@@ -13,12 +13,12 @@ class VoskEngine {
     this.mediaStream = null;
     this.processor = null;
     this.callbacks = {};
-    
+
     // Audio processing
     this.audioBuffer = [];
     this.sampleRate = 16000;
     this.chunkSize = 4096;
-    
+
     // Quality management
     this.lastResult = '';
     this.lastResultTime = 0;
@@ -115,7 +115,7 @@ class VoskEngine {
 
     try {
       console.log('Initializing Vosk engine...');
-      
+
       // Load the model
       this.model = await this.loadModel();
       if (!this.model) {
@@ -126,6 +126,11 @@ class VoskEngine {
       this.recognizer = new this.model.KaldiRecognizer(this.sampleRate);
       if (!this.recognizer) {
         throw new Error('Failed to create Vosk recognizer');
+      }
+
+      // Enable word-level timestamps
+      if (typeof this.recognizer.setWords === 'function') {
+        this.recognizer.setWords(true);
       }
 
       this.isInitialized = true;
@@ -146,12 +151,12 @@ class VoskEngine {
 
       const metadata = VoskEngine.getMetadata();
       const modelPath = metadata.modelPath;
-      
+
       console.log(`Loading Vosk model from: ${modelPath}`);
-      
+
       // Create model using the global Vosk instance
       const model = await Vosk.createModel(modelPath);
-      
+
       if (!model) {
         throw new Error('Failed to create Vosk model');
       }
@@ -176,7 +181,7 @@ class VoskEngine {
 
     try {
       console.log('Starting Vosk recognition...');
-      
+
       this.callbacks = { onResult, onError, onStatus };
       this.isRecording = true;
 
@@ -254,7 +259,7 @@ class VoskEngine {
           const parsedResult = JSON.parse(result);
           if (parsedResult.text && parsedResult.text.trim()) {
             const text = parsedResult.text.trim();
-            
+
             // Apply quality management
             if (this.isQualityResult(text)) {
               if (this.callbacks.onResult) {
@@ -270,7 +275,7 @@ class VoskEngine {
           const parsedPartial = JSON.parse(partialResult);
           if (parsedPartial.partial && parsedPartial.partial.trim()) {
             const partialText = parsedPartial.partial.trim();
-            
+
             if (this.callbacks.onResult) {
               this.callbacks.onResult(partialText, 'partial');
             }
@@ -291,7 +296,7 @@ class VoskEngine {
 
     try {
       console.log('Stopping Vosk recognition...');
-      
+
       this.isRecording = false;
 
       // Stop media stream
@@ -336,28 +341,31 @@ class VoskEngine {
   }
 
   // Transcribe audio file
-  async transcribeFile(file) {
+  async transcribeFile(file, onProgress) {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     try {
       console.log('Transcribing file with Vosk:', file.name);
-      
+
       const startTime = Date.now();
-      
+
       // Read file as array buffer
       const arrayBuffer = await file.arrayBuffer();
       const audioData = new Int16Array(arrayBuffer);
-      
+
       // Process audio data in chunks
       const chunkSize = this.chunkSize;
+      const totalChunks = Math.ceil(audioData.length / chunkSize);
+
       let finalText = '';
-      
-      for (let i = 0; i < audioData.length; i += chunkSize) {
+      let words = [];
+
+      for (let i = 0, currentChunk = 0; i < audioData.length; i += chunkSize, currentChunk++) {
         const chunk = audioData.slice(i, i + chunkSize);
         const hasResult = this.recognizer.acceptWaveform(chunk);
-        
+
         if (hasResult) {
           const result = this.recognizer.retrieveFinalResult();
           if (result) {
@@ -365,10 +373,26 @@ class VoskEngine {
             if (parsedResult.text) {
               finalText += ' ' + parsedResult.text;
             }
+            if (parsedResult.result) {
+              words = words.concat(parsedResult.result);
+            }
           }
         }
+
+        // Yield to UI thread every so often (e.g., every 50 chunks approx 0.1s audio)
+        if (currentChunk % 50 === 0) {
+          const percent = (currentChunk / totalChunks) * 100;
+          if (onProgress) {
+            onProgress({
+              percent: percent,
+              status: `Transcribing... ${Math.round(percent)}%`,
+              words: words // Pass interim words for realtime update if desired
+            });
+          }
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       }
-      
+
       // Get any remaining final result
       const finalResult = this.recognizer.retrieveFinalResult();
       if (finalResult) {
@@ -376,21 +400,29 @@ class VoskEngine {
         if (parsedResult.text) {
           finalText += ' ' + parsedResult.text;
         }
+        if (parsedResult.result) {
+          words = words.concat(parsedResult.result);
+        }
       }
-      
+
       const duration = (Date.now() - startTime) / 1000;
       const text = finalText.trim();
-      
+
       console.log(`Vosk file transcription completed in ${duration}s`);
-      
+
+      if (onProgress) {
+        onProgress({ percent: 100, status: 'Finalizing...', words });
+      }
+
       return {
         text,
+        words, // Return the accumulated words array {word, start, end, conf}
         duration,
         engine: 'vosk',
-        confidence: 0.9, // Vosk doesn't provide confidence scores
+        confidence: 0.9, // Vosk doesn't provide confidence scores globally
         language: 'en-us'
       };
-      
+
     } catch (error) {
       console.error('Vosk file transcription failed:', error);
       throw error;
@@ -400,7 +432,7 @@ class VoskEngine {
   // Quality management
   isQualityResult(text) {
     const now = Date.now();
-    
+
     // Check time window
     if (now - this.lastResultTime < this.deduplicationWindow) {
       // Check similarity
@@ -409,7 +441,7 @@ class VoskEngine {
         return false; // Too similar, skip
       }
     }
-    
+
     this.lastResult = text;
     this.lastResultTime = now;
     return true;
@@ -418,13 +450,13 @@ class VoskEngine {
   // Calculate text similarity
   calculateSimilarity(text1, text2) {
     if (!text1 || !text2) return 0;
-    
+
     const words1 = text1.toLowerCase().split(/\s+/);
     const words2 = text2.toLowerCase().split(/\s+/);
-    
+
     const intersection = words1.filter(word => words2.includes(word));
     const union = [...new Set([...words1, ...words2])];
-    
+
     return intersection.length / union.length;
   }
 
@@ -448,11 +480,11 @@ class VoskEngine {
   async setLanguage(languageCode) {
     const metadata = VoskEngine.getMetadata();
     const language = metadata.languages.find(lang => lang.code === languageCode);
-    
+
     if (!language) {
       throw new Error(`Language '${languageCode}' not supported`);
     }
-    
+
     // For now, we'll need to reload the model with the new language
     // This is a simplified implementation
     console.log(`Language set to: ${language.name} (${languageCode})`);
@@ -480,7 +512,7 @@ class VoskEngine {
   async cleanup() {
     try {
       await this.stop();
-      
+
       if (this.recognizer) {
         // Try different cleanup methods
         if (typeof this.recognizer.free === 'function') {
@@ -492,10 +524,10 @@ class VoskEngine {
         }
         this.recognizer = null;
       }
-      
+
       this.model = null;
       this.isInitialized = false;
-      
+
       console.log('Vosk engine cleaned up');
     } catch (error) {
       console.error('Vosk cleanup error:', error);
