@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,37 +11,125 @@
   <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.svg">
   <title>Voice Notes PWA</title>
 </head>
+
 <body>
-  <div id="app">
-    <h1>Voice Notes</h1>
-    <div class="recorder-controls">
-      <button id="recordBtn">Start Recording</button>
-      <span id="recordingStatus"></span>
+  <div class="container" id="app">
+    <div class="header">
+      <div class="header-titles">
+        <h1>🎤 Voice Notes</h1>
+        <p>Private & Offline</p>
+      </div>
+      <button id="settingsBtn" class="settings-btn" title="Settings">⚙️</button>
     </div>
-    <div class="session-title-section">
-      <input id="sessionTitle" type="text" placeholder="Session Title (optional)" maxlength="100" />
-    </div>
-    <div class="transcript-section">
-      <h2>Transcript</h2>
-      <textarea id="transcript"></textarea>
-      <button id="copyTranscriptBtn" title="Copy Transcript">Copy</button>
-      <button id="sendToLLMBtn">Summarize</button>
-      <div class="summarize-controls" id="summarizeControls"></div>
-    </div>
-    <div class="status-bar" id="statusBar"></div>
-    <div class="summary-section">
-      <h2>Summary</h2>
-      <div id="summary"></div>
-      <button id="copySummaryBtn" title="Copy Summary">Copy</button>
-    </div>
-    <div class="history-section-bottom">
-      <h2>History</h2>
-      <ul id="historyList"></ul>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <div class="session-title-section">
+        <input id="sessionTitle" type="text" class="session-title" placeholder="Session Title (optional)"
+          maxlength="100" />
+      </div>
+
+      <!-- Recording Controls -->
+      <div class="recording-section">
+        <button id="recordBtn" class="record-btn" disabled>Start Recording</button>
+        <div id="recordingStatus" class="recording-status"></div>
+      </div>
+
+      <!-- Audio Upload (Shown if supported) -->
+      <div class="upload-section" id="uploadSection" style="display: none;">
+        <label for="audioFile" class="upload-label">📁 Upload Audio File</label>
+        <input type="file" id="audioFile" accept="audio/*" style="display: none;" />
+        <div class="upload-area" id="uploadArea">
+          <span>Drop audio here or click to browse</span>
+        </div>
+        <div class="upload-actions">
+          <button id="transcribeFileBtn" class="main-action" disabled>🎵 Transcribe</button>
+          <span id="fileInfo" class="file-info"></span>
+        </div>
+      </div>
+
+      <!-- Audio Player & Progress (Hidden by default) -->
+      <audio id="audioPlayback" controls class="audio-player"
+        style="display: none; width: 100%; margin-top: 15px;"></audio>
+      <div id="progressContainer" class="progress-container" style="display: none; margin-top: 15px;">
+        <div class="progress-label" id="progressLabel">Processing...</div>
+        <div class="progress-bar-bg">
+          <div id="progressBar" class="progress-bar-fill"></div>
+        </div>
+      </div>
+
+      <!-- Transcript Section -->
+      <div class="transcript-section">
+        <div class="section-header">
+          <label class="transcript-label">📝 Transcript</label>
+          <!-- Tab Controls -->
+          <div class="transcript-tabs">
+            <button id="tabText" class="tab-btn active">Text</button>
+            <button id="tabTimed" class="tab-btn">Interactive</button>
+          </div>
+        </div>
+
+        <textarea id="transcript" class="transcript-area" placeholder="Transcribed text appears here..."></textarea>
+
+        <div id="timedTranscript" class="transcript-area timed-transcript" style="display: none;">
+          <div class="timed-empty">No interactive transcript available.</div>
+        </div>
+
+        <div class="transcript-actions">
+          <button id="copyTranscriptBtn" class="secondary-action">📋 Copy</button>
+          <button id="sendToLLMBtn" class="main-action">🤖 Summarize</button>
+        </div>
+      </div>
+
+      <!-- Summary Section -->
+      <div class="summary-section">
+        <label class="transcript-label">📊 Summary</label>
+        <div id="summary" class="summary-content"></div>
+        <button id="copySummaryBtn" class="secondary-action" style="margin-top: 10px;">📋 Copy</button>
+      </div>
+
+      <!-- History Section -->
+      <div class="history-section">
+        <label class="transcript-label">📚 History</label>
+        <ul id="historyList" class="history-list"></ul>
+      </div>
     </div>
   </div>
-  <div id="updateBanner" style="display:none;position:fixed;bottom:0;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;box-shadow:0 -2px 8px 0 rgba(25,118,210,0.10);">
+
+  <!-- Settings Modal (Hidden by default) -->
+  <div id="settingsModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>⚙️ Settings</h2>
+        <button id="closeSettingsBtn" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="engine-section">
+          <label class="settings-label">Recognition Engine</label>
+          <select id="engineSelector" class="engine-selector">
+            <option value="">Loading engines...</option>
+          </select>
+
+          <div class="engine-info" id="engineInfo">
+            <div class="engine-type">Loading...</div>
+            <div class="engine-description">Initializing...</div>
+            <div class="engine-features" id="engineFeatures"></div>
+          </div>
+
+          <div id="modelDownloadStatus" class="model-status" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar" id="statusBar">Initializing...</div>
+
+  <div id="updateBanner"
+    style="display:none;position:fixed;bottom:40px;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;">
     A new version is available. Click to update.
   </div>
-  <script src="app.js"></script>
+
+  <script type="module" src="app.js?v=8"></script>
 </body>
+
 </html>
