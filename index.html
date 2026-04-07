@@ -10,6 +10,8 @@
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.png">
   <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.svg">
   <title>Voice Notes PWA</title>
+  <!-- Pretext for high-performance text layout -->
+  <script src="https://cdn.jsdelivr.net/npm/@chenglou/pretext@latest/dist/pretext.min.js"></script>
 </head>
 
 <body>
@@ -124,12 +126,19 @@
 
   <div class="status-bar" id="statusBar">Initializing...</div>
 
-  <div id="updateBanner"
-    style="display:none;position:fixed;bottom:40px;left:0;width:100%;background:#1976d2;color:#fff;text-align:center;padding:12px 0;z-index:1000;cursor:pointer;font-weight:600;">
-    A new version is available. Click to update.
-  </div>
+  <script type="module" src="app.js?v=9"></script>
 
-  <script type="module" src="app.js?v=8"></script>
+  <!-- Institutional Footer -->
+  <footer class="hub-footer">
+    <div class="footer-content">
+      <a href="https://wecanuseai.com" class="back-link">
+        <span class="icon">🏠</span> Back to WeCanUseAI.com
+      </a>
+      <div class="footer-info">
+        <span>Privacy-First</span> • <span>Zero-Friction</span> • <span>Jules Standard</span>
+      </div>
+    </div>
+  </footer>
 </body>
 
 </html>
