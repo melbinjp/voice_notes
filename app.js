@@ -213,7 +213,6 @@ async function initApp() {
   await Promise.allSettled([
     import('./engines/webspeech-engine.js'),
     import('./engines/whisper-engine.js'),
-    import('./engines/vosk-engine.js'),
   ]);
   const { default: ModularRecognitionManager } = await import('./modular-recognition-manager.js');
   manager = new ModularRecognitionManager();
@@ -224,7 +223,7 @@ async function initApp() {
   ).join('');
 
   // Select best available engine — try in priority order, skip unavailable
-  const priorityOrder = ['webspeech', 'whisper', 'vosk'];
+  const priorityOrder = ['webspeech', 'whisper'];
   let engineReady = false;
   for (const eid of priorityOrder) {
     try {
