@@ -2,7 +2,6 @@
 import moduleRegistry from './module-registry.js?v=7';
 
 // Import all engine modules to trigger auto-registration
-import './engines/vosk-engine.js?v=7';
 import './engines/webspeech-engine.js?v=7';
 import './engines/whisper-engine.js?v=7';
 
