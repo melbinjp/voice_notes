@@ -1,142 +1,231 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Voice Notes — Record, transcribe, and summarize your voice notes privately and offline. A powerful PWA that works on any device." />
+  <meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0b0f1a" media="(prefers-color-scheme: dark)" />
   <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="style.css" />
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.png">
-  <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.svg">
-  <title>Voice Notes PWA</title>
-  <!-- Pretext for high-performance text layout -->
-  <script src="https://cdn.jsdelivr.net/npm/@chenglou/pretext@latest/dist/pretext.min.js"></script>
+  <title>Voice Notes — Private & Offline</title>
 </head>
-
 <body>
-  <div class="container" id="app">
-    <div class="header">
-      <div class="header-titles">
-        <h1>🎤 Voice Notes</h1>
-        <p>Private & Offline</p>
-      </div>
-      <button id="settingsBtn" class="settings-btn" title="Settings">⚙️</button>
+
+<div id="app">
+
+  <!-- ── Header ── -->
+  <header class="app-header" role="banner">
+    <div class="header-brand">
+      <h1>🎤 Voice Notes</h1>
+      <p>Private &amp; Offline</p>
+    </div>
+    <div class="header-actions">
+      <button id="themeToggleBtn" class="btn-icon" aria-label="Toggle dark/light theme" title="Toggle theme">🌙</button>
+      <button id="shortcutsBtn" class="btn-icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts">⌨️</button>
+      <button id="settingsBtn" class="btn-icon" aria-label="Open settings" title="Settings">⚙️</button>
+    </div>
+  </header>
+
+  <!-- ── Main content ── -->
+  <main role="main">
+
+    <!-- Session title -->
+    <div class="card" style="padding: 16px 24px;">
+      <input id="sessionTitle" type="text" class="session-title-input" placeholder="📝 Session title (optional)" maxlength="100" aria-label="Session title" />
     </div>
 
-    <!-- Main Content Area -->
-    <div class="main-content">
-      <div class="session-title-section">
-        <input id="sessionTitle" type="text" class="session-title" placeholder="Session Title (optional)"
-          maxlength="100" />
-      </div>
+    <!-- Recording Card -->
+    <div class="card" role="region" aria-label="Recording controls">
+      <canvas id="waveformCanvas" class="hidden" aria-hidden="true" width="740" height="72"></canvas>
 
-      <!-- Recording Controls -->
-      <div class="recording-section">
-        <button id="recordBtn" class="record-btn" disabled>Start Recording</button>
-        <div id="recordingStatus" class="recording-status"></div>
-      </div>
-
-      <!-- Audio Upload (Shown if supported) -->
-      <div class="upload-section" id="uploadSection" style="display: none;">
-        <label for="audioFile" class="upload-label">📁 Upload Audio File</label>
-        <input type="file" id="audioFile" accept="audio/*" style="display: none;" />
-        <div class="upload-area" id="uploadArea">
-          <span>Drop audio here or click to browse</span>
-        </div>
-        <div class="upload-actions">
-          <button id="transcribeFileBtn" class="main-action" disabled>🎵 Transcribe</button>
-          <span id="fileInfo" class="file-info"></span>
+      <div class="recording-section" style="margin-top: 12px;">
+        <button id="recordBtn" class="btn-primary" disabled aria-label="Start recording" title="Start recording (Space)">
+          <span id="recordBtnIcon">🎙️</span>
+          <span id="recordBtnLabel">Start Recording</span>
+        </button>
+        <div class="recording-meta" aria-live="polite">
+          <div id="recordingDot" class="recording-dot" aria-hidden="true"></div>
+          <span id="recordingStatus"></span>
+          <span id="recordingTimer" style="font-variant-numeric: tabular-nums; display:none;" aria-label="Recording duration">00:00</span>
         </div>
       </div>
 
-      <!-- Audio Player & Progress (Hidden by default) -->
-      <audio id="audioPlayback" controls class="audio-player"
-        style="display: none; width: 100%; margin-top: 15px;"></audio>
-      <div id="progressContainer" class="progress-container" style="display: none; margin-top: 15px;">
+      <!-- Language row -->
+      <div class="lang-row" style="margin-top: 16px;">
+        <label for="languageSelector">🌐 Language:</label>
+        <select id="languageSelector" aria-label="Speech recognition language" style="width:auto; flex:1; max-width:260px;"></select>
+      </div>
+
+      <p class="kbd-hint" aria-hidden="true">Press <kbd>Space</kbd> to start / stop recording &nbsp;|&nbsp; <kbd>Ctrl+Shift+C</kbd> to copy transcript</p>
+    </div>
+
+    <!-- File Upload Card -->
+    <div class="card" id="uploadSection" style="display:none;" role="region" aria-label="File upload">
+      <div class="section-header">
+        <span class="section-label">📁 Transcribe Audio File</span>
+      </div>
+      <label for="audioFile" style="display:block; cursor:pointer;">
+        <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Drop audio file here or click to browse">
+          Drop audio here or <strong>click to browse</strong>
+        </div>
+      </label>
+      <input type="file" id="audioFile" accept="audio/*" style="display:none;" aria-label="Choose audio file" />
+      <div class="action-row" style="margin-top: 12px; align-items: center;">
+        <button id="transcribeFileBtn" class="btn-primary" disabled aria-label="Transcribe selected file">🎵 Transcribe</button>
+        <span id="fileInfo" class="file-info"></span>
+      </div>
+      <audio id="audioPlayback" controls style="display:none; margin-top: 12px;" aria-label="Audio playback"></audio>
+      <div id="progressContainer" style="display:none;">
         <div class="progress-label" id="progressLabel">Processing...</div>
-        <div class="progress-bar-bg">
-          <div id="progressBar" class="progress-bar-fill"></div>
-        </div>
+        <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
       </div>
+    </div>
 
-      <!-- Transcript Section -->
-      <div class="transcript-section">
-        <div class="section-header">
-          <label class="transcript-label">📝 Transcript</label>
-          <!-- Tab Controls -->
-          <div class="transcript-tabs">
-            <button id="tabText" class="tab-btn active">Text</button>
-            <button id="tabTimed" class="tab-btn">Interactive</button>
+    <!-- Transcript Card -->
+    <div class="card" role="region" aria-label="Transcript">
+      <div class="section-header">
+        <span class="section-label">📝 Transcript</span>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span id="wordCount" class="word-count-badge" aria-live="polite">0 words</span>
+          <div class="tab-group" role="tablist" aria-label="Transcript view">
+            <button id="tabText" class="tab-btn active" role="tab" aria-selected="true" aria-controls="transcriptTextView">Text</button>
+            <button id="tabTimed" class="tab-btn" role="tab" aria-selected="false" aria-controls="timedTranscript">Interactive</button>
           </div>
         </div>
-
-        <textarea id="transcript" class="transcript-area" placeholder="Transcribed text appears here..."></textarea>
-
-        <div id="timedTranscript" class="transcript-area timed-transcript" style="display: none;">
-          <div class="timed-empty">No interactive transcript available.</div>
-        </div>
-
-        <div class="transcript-actions">
-          <button id="copyTranscriptBtn" class="secondary-action">📋 Copy</button>
-          <button id="sendToLLMBtn" class="main-action">🤖 Summarize</button>
-        </div>
       </div>
 
-      <!-- Summary Section -->
-      <div class="summary-section">
-        <label class="transcript-label">📊 Summary</label>
-        <div id="summary" class="summary-content"></div>
-        <button id="copySummaryBtn" class="secondary-action" style="margin-top: 10px;">📋 Copy</button>
+      <div id="transcriptTextView" role="tabpanel">
+        <textarea id="transcript" class="transcript-area" placeholder="Transcribed text appears here..." aria-label="Transcript text"></textarea>
       </div>
 
-      <!-- History Section -->
-      <div class="history-section">
-        <label class="transcript-label">📚 History</label>
-        <ul id="historyList" class="history-list"></ul>
+      <div id="timedTranscript" class="timed-transcript-area" role="tabpanel" aria-label="Interactive timed transcript">
+        <div class="history-empty">No interactive transcript available.</div>
       </div>
-    </div>
-  </div>
 
-  <!-- Settings Modal (Hidden by default) -->
-  <div id="settingsModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2>⚙️ Settings</h2>
-        <button id="closeSettingsBtn" class="close-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="engine-section">
-          <label class="settings-label">Recognition Engine</label>
-          <select id="engineSelector" class="engine-selector">
-            <option value="">Loading engines...</option>
-          </select>
-
-          <div class="engine-info" id="engineInfo">
-            <div class="engine-type">Loading...</div>
-            <div class="engine-description">Initializing...</div>
-            <div class="engine-features" id="engineFeatures"></div>
+      <div class="action-row">
+        <button id="copyTranscriptBtn" class="btn-ghost" aria-label="Copy transcript to clipboard">📋 Copy</button>
+        <div class="export-wrapper">
+          <button id="exportBtn" class="btn-ghost" aria-label="Export transcript" aria-haspopup="true" aria-expanded="false">⬇️ Export ▾</button>
+          <div id="exportMenu" class="export-menu" role="menu" aria-label="Export options">
+            <button id="exportTxt" role="menuitem">📄 Plain Text (.txt)</button>
+            <button id="exportMd"  role="menuitem">📘 Markdown (.md)</button>
+            <button id="exportJson" role="menuitem">📊 JSON (.json)</button>
           </div>
-
-          <div id="modelDownloadStatus" class="model-status" style="display: none;"></div>
         </div>
+        <button id="sendToLLMBtn" class="btn-primary" aria-label="Summarize transcript offline">🤖 Summarize</button>
       </div>
     </div>
-  </div>
 
-  <div class="status-bar" id="statusBar">Initializing...</div>
-
-  <script type="module" src="app.js?v=9"></script>
-
-    <footer role="contentinfo" style="margin-top: 2rem; padding: 1.5rem; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); color: #888;">
-    <p>&copy; <span class="copyright-year"></span> WeCanUseAI. Empowering creativity with AI.</p>
-    <div style="margin-top: 0.5rem; display: flex; justify-content: center; gap: 1.5rem;">
-      <a href="https://wecanuseai.com/" style="color: inherit; text-decoration: none;">Home</a>
-      <a href="https://wecanuseai.com/privacy.html" style="color: inherit; text-decoration: none;">Privacy</a>
-      <a href="https://wecanuseai.com/terms.html" style="color: inherit; text-decoration: none;">Terms</a>
-      <a href="https://wecanuseai.com/contact.html" style="color: inherit; text-decoration: none;">Contact</a>
+    <!-- Summary Card -->
+    <div class="card" role="region" aria-label="Summary">
+      <div class="section-header">
+        <span class="section-label">📊 Summary</span>
+      </div>
+      <div id="summary" class="summary-content" aria-live="polite"></div>
+      <div class="action-row">
+        <button id="copySummaryBtn" class="btn-ghost" aria-label="Copy summary to clipboard">📋 Copy Summary</button>
+      </div>
     </div>
-  </footer>
+
+    <!-- History Card -->
+    <div class="card" role="region" aria-label="Note history">
+      <div class="section-header">
+        <span class="section-label">📚 History</span>
+        <button id="clearAllBtn" class="btn-ghost" style="font-size:0.78rem; padding:6px 12px; color:var(--danger);" aria-label="Clear all history">🗑️ Clear All</button>
+      </div>
+      <div class="history-controls">
+        <input type="text" id="historySearch" placeholder="🔍 Search notes..." aria-label="Search history" />
+        <select id="historySort" aria-label="Sort history">
+          <option value="date-desc">Newest first</option>
+          <option value="date-asc">Oldest first</option>
+          <option value="title-asc">Title A–Z</option>
+        </select>
+      </div>
+      <div id="historyGrid" class="history-grid" role="list" aria-label="Note history list"></div>
+    </div>
+
+    <div class="status-bar" id="statusBar" aria-live="polite">Initializing...</div>
+  </main>
+
+</div>
+
+<!-- ── Settings Modal ── -->
+<div id="settingsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="settingsTitle">⚙️ Settings</h2>
+      <button id="closeSettingsBtn" class="btn-icon" aria-label="Close settings">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <div class="settings-group">
+        <label for="engineSelector">Recognition Engine</label>
+        <select id="engineSelector" aria-label="Select speech recognition engine">
+          <option value="">Loading engines...</option>
+        </select>
+        <div id="engineInfo" class="engine-info-card">
+          <div class="engine-info-name">Loading...</div>
+          <div class="engine-info-desc">Initializing...</div>
+          <div id="engineFeatures" class="engine-features"></div>
+        </div>
+        <div id="modelDownloadStatus" class="model-status" style="display:none;"></div>
+      </div>
+
+      <div class="settings-group">
+        <label for="themeSelect">Theme</label>
+        <select id="themeSelect" aria-label="Choose app theme">
+          <option value="light">☀️ Light</option>
+          <option value="dark">🌙 Dark</option>
+          <option value="system">🖥️ System default</option>
+        </select>
+      </div>
+
+      <div class="settings-group">
+        <label for="fontSizeSlider">Text Size: <span id="fontSizeLabel">100%</span></label>
+        <input type="range" id="fontSizeSlider" min="80" max="130" step="5" value="100" aria-label="Adjust text size" />
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Shortcuts Modal ── -->
+<div id="shortcutsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+  <div class="modal-box" style="max-width: 400px;">
+    <div class="modal-header">
+      <h2 id="shortcutsTitle">⌨️ Keyboard Shortcuts</h2>
+      <button id="closeShortcutsBtn" class="btn-icon" aria-label="Close shortcuts">✕</button>
+    </div>
+    <table style="width:100%; border-collapse:collapse; font-size:0.88rem;">
+      <tbody>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Toggle recording</td><td style="text-align:right;"><kbd>Space</kbd></td></tr>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Copy transcript</td><td style="text-align:right;"><kbd>Ctrl+Shift+C</kbd></td></tr>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Toggle theme</td><td style="text-align:right;"><kbd>Ctrl+Shift+T</kbd></td></tr>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Open settings</td><td style="text-align:right;"><kbd>Ctrl+,</kbd></td></tr>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Close modal</td><td style="text-align:right;"><kbd>Escape</kbd></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Toast Container ── -->
+<div id="toastContainer" aria-live="assertive" aria-atomic="true"></div>
+
+<!-- ── Footer ── -->
+<footer role="contentinfo">
+  <p>© <span class="copyright-year"></span> WeCanUseAI. Empowering creativity with AI.</p>
+  <nav class="footer-links" aria-label="Footer navigation">
+    <a href="https://wecanuseai.com/">Home</a>
+    <a href="https://wecanuseai.com/privacy.html">Privacy</a>
+    <a href="https://wecanuseai.com/terms.html">Terms</a>
+    <a href="https://wecanuseai.com/contact.html">Contact</a>
+  </nav>
+</footer>
+
+<script type="module" src="app.js?v=10"></script>
 </body>
-
 </html>

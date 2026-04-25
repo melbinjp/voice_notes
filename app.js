@@ -1,467 +1,596 @@
-// --- UI Elements ---
-const appSetup = () => {
-    // Initialize Pretext for high-performance layout
-    const pretext = window.pretext || { layout: (text) => text };
-    
-    const elements = {
-        recordBtn: document.getElementById('recordBtn'),
-        recordingStatus: document.getElementById('recordingStatus'),
-        sessionTitle: document.getElementById('sessionTitle'),
+import {
+  applyTheme, getStoredTheme, toggleTheme, showToast,
+  WaveformVisualizer, RecordingTimer,
+  exportNote, saveNote, loadAllNotes, deleteNote, updateNote, clearAllNotes
+} from './app-utils.js';
 
-        // Transcript section
-        transcriptArea: document.getElementById('transcript'),
-        timedTranscript: document.getElementById('timedTranscript'),
-        tabText: document.getElementById('tabText'),
-        tabTimed: document.getElementById('tabTimed'),
-        copyTranscriptBtn: document.getElementById('copyTranscriptBtn'),
-        sendToLLMBtn: document.getElementById('sendToLLMBtn'),
+// ── Boot ────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  initFontSize();
+  initCopyrightYear();
+  initModals();
+  initKeyboardShortcuts();
+  initApp();
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  }
+});
 
-        // Summary & History
-        summary: document.getElementById('summary'),
-        historyList: document.getElementById('historyList'),
-        copySummaryBtn: document.getElementById('copySummaryBtn'),
+// ── Theme & Font ─────────────────────────────────────────────────────────
+function initTheme() {
+  applyTheme(getStoredTheme());
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (getStoredTheme() === 'system') applyTheme('system');
+  });
+  document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
+  document.getElementById('themeSelect').addEventListener('change', e => applyTheme(e.target.value));
+}
 
-        // File Upload
-        audioFile: document.getElementById('audioFile'),
-        uploadArea: document.getElementById('uploadArea'),
-        transcribeFileBtn: document.getElementById('transcribeFileBtn'),
-        fileInfo: document.getElementById('fileInfo'),
+function initFontSize() {
+  const slider = document.getElementById('fontSizeSlider');
+  const label = document.getElementById('fontSizeLabel');
+  const stored = localStorage.getItem('vn-fontsize') || '100';
+  slider.value = stored;
+  label.textContent = stored + '%';
+  document.documentElement.style.fontSize = (parseInt(stored) / 100) + 'rem';
+  slider.addEventListener('input', () => {
+    const v = slider.value;
+    label.textContent = v + '%';
+    document.documentElement.style.fontSize = (parseInt(v) / 100) + 'rem';
+    localStorage.setItem('vn-fontsize', v);
+  });
+}
 
-        // Status & Progress
-        statusBar: document.getElementById('statusBar'),
-        progressContainer: document.getElementById('progressContainer'),
-        progressLabel: document.getElementById('progressLabel'),
-        progressBar: document.getElementById('progressBar'),
-        audioPlayback: document.getElementById('audioPlayback'),
+function initCopyrightYear() {
+  document.querySelectorAll('.copyright-year').forEach(el => {
+    el.textContent = new Date().getFullYear();
+  });
+}
 
-        // Settings Modal
-        settingsBtn: document.getElementById('settingsBtn'),
-        settingsModal: document.getElementById('settingsModal'),
-        closeSettingsBtn: document.getElementById('closeSettingsBtn'),
-        engineSelector: document.getElementById('engineSelector'),
-        engineInfo: document.getElementById('engineInfo')
-    };
+// ── Modals ───────────────────────────────────────────────────────────────
+function initModals() {
+  const pairs = [
+    ['settingsBtn', 'settingsModal', 'closeSettingsBtn'],
+    ['shortcutsBtn', 'shortcutsModal', 'closeShortcutsBtn'],
+  ];
+  pairs.forEach(([openId, modalId, closeId]) => {
+    const modal = document.getElementById(modalId);
+    document.getElementById(openId).addEventListener('click', () => modal.classList.add('open'));
+    document.getElementById(closeId).addEventListener('click', () => modal.classList.remove('open'));
+    modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+  });
+}
 
-    let state = {
-        isRecording: false,
-        recognition: null,
-        transcriptText: '',
-        selectedFile: null,
-        timedWords: [],
-        modelsCache: { whisper: false, summarizer: false }
-    };
+function closeAllModals() {
+  document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+}
 
-    // --- Utility: Status & Progress ---
-    const setStatus = (msg) => {
-        if (elements.statusBar) elements.statusBar.textContent = msg;
-    };
+// ── Keyboard Shortcuts ───────────────────────────────────────────────────
+function initKeyboardShortcuts() {
+  document.addEventListener('keydown', e => {
+    const tag = document.activeElement.tagName;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
 
-    const updateProgress = (show, percent = null, label = null) => {
-        if (show) {
-            elements.progressContainer.style.display = 'block';
-            if (label) elements.progressLabel.textContent = label;
-            if (percent !== null) {
-                elements.progressBar.style.width = `${percent}%`;
-            } else {
-                // Indeterminate
-                elements.progressBar.style.width = '100%';
-                elements.progressBar.style.animation = 'pulse 1.5s infinite';
-            }
-        } else {
-            elements.progressContainer.style.display = 'none';
-            elements.progressBar.style.animation = 'none';
-            elements.progressBar.style.width = '0%';
-        }
-    };
+    if (e.key === 'Escape') { closeAllModals(); return; }
 
-    // --- Settings Modal Logic ---
-    elements.settingsBtn.addEventListener('click', () => {
-        elements.settingsModal.style.display = 'flex';
-    });
+    if (!typing && e.key === ' ') {
+      e.preventDefault();
+      document.getElementById('recordBtn').click();
+    }
+    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+      e.preventDefault();
+      document.getElementById('copyTranscriptBtn').click();
+    }
+    if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      e.preventDefault();
+      toggleTheme();
+    }
+    if (e.ctrlKey && e.key === ',') {
+      e.preventDefault();
+      document.getElementById('settingsModal').classList.add('open');
+    }
+  });
+}
 
-    elements.closeSettingsBtn.addEventListener('click', () => {
-        elements.settingsModal.style.display = 'none';
-    });
+// ── Main App ─────────────────────────────────────────────────────────────
+async function initApp() {
+  const el = {
+    recordBtn: document.getElementById('recordBtn'),
+    recordBtnIcon: document.getElementById('recordBtnIcon'),
+    recordBtnLabel: document.getElementById('recordBtnLabel'),
+    recordingStatus: document.getElementById('recordingStatus'),
+    recordingDot: document.getElementById('recordingDot'),
+    sessionTitle: document.getElementById('sessionTitle'),
+    transcript: document.getElementById('transcript'),
+    timedTranscript: document.getElementById('timedTranscript'),
+    tabText: document.getElementById('tabText'),
+    tabTimed: document.getElementById('tabTimed'),
+    wordCount: document.getElementById('wordCount'),
+    copyTranscriptBtn: document.getElementById('copyTranscriptBtn'),
+    exportBtn: document.getElementById('exportBtn'),
+    exportMenu: document.getElementById('exportMenu'),
+    exportTxt: document.getElementById('exportTxt'),
+    exportMd: document.getElementById('exportMd'),
+    exportJson: document.getElementById('exportJson'),
+    sendToLLMBtn: document.getElementById('sendToLLMBtn'),
+    summary: document.getElementById('summary'),
+    copySummaryBtn: document.getElementById('copySummaryBtn'),
+    statusBar: document.getElementById('statusBar'),
+    progressContainer: document.getElementById('progressContainer'),
+    progressLabel: document.getElementById('progressLabel'),
+    progressBar: document.getElementById('progressBar'),
+    audioFile: document.getElementById('audioFile'),
+    uploadArea: document.getElementById('uploadArea'),
+    uploadSection: document.getElementById('uploadSection'),
+    transcribeFileBtn: document.getElementById('transcribeFileBtn'),
+    fileInfo: document.getElementById('fileInfo'),
+    audioPlayback: document.getElementById('audioPlayback'),
+    engineSelector: document.getElementById('engineSelector'),
+    engineInfo: document.getElementById('engineInfo'),
+    languageSelector: document.getElementById('languageSelector'),
+    historyGrid: document.getElementById('historyGrid'),
+    historySearch: document.getElementById('historySearch'),
+    historySort: document.getElementById('historySort'),
+    clearAllBtn: document.getElementById('clearAllBtn'),
+  };
 
-    // Close modal when clicking outside
-    elements.settingsModal.addEventListener('click', (e) => {
-        if (e.target === elements.settingsModal) {
-            elements.settingsModal.style.display = 'none';
-        }
-    });
+  const state = {
+    isRecording: false,
+    transcriptText: '',
+    timedWords: [],
+    selectedFile: null,
+    currentNote: null,
+  };
 
-    // --- Modular Recognition Integration ---
-    let recognizer = null;
-    let manager = null;
+  const waveform = new WaveformVisualizer('waveformCanvas');
+  const timer = new RecordingTimer('recordingTimer');
+  let micStream = null;
 
-    const setupManager = async () => {
-        const { default: ModularRecognitionManager } = await import('./modular-recognition-manager.js');
-        manager = new ModularRecognitionManager();
-        
-        const availableEngines = await manager.initializeEngines();
-        renderEngineOptions(availableEngines);
-        
-        // Auto-select best engine or default to web
-        await manager.autoSelectEngine(['live_recognition']);
-        updateEngineUI();
-    };
+  const setStatus = msg => { el.statusBar.textContent = msg; };
 
-    const renderEngineOptions = (engines) => {
-        elements.engineSelector.innerHTML = engines.map(e => 
-            `<option value="${e.id}">${e.name} (${e.type})</option>`
-        ).join('');
-    };
+  const updateProgress = (show, pct = null, label = null) => {
+    el.progressContainer.style.display = show ? 'block' : 'none';
+    if (label) el.progressLabel.textContent = label;
+    if (pct !== null) {
+      el.progressBar.style.animation = 'none';
+      el.progressBar.style.width = pct + '%';
+    } else if (show) {
+      el.progressBar.style.width = '100%';
+      el.progressBar.style.animation = 'pulse 1.5s infinite';
+    }
+    if (!show) { el.progressBar.style.animation = 'none'; el.progressBar.style.width = '0%'; }
+  };
 
-    const updateEngineUI = () => {
-        const info = manager.getCurrentEngineInfo();
-        if (!info) return;
+  const updateWordCount = () => {
+    const words = el.transcript.value.trim().split(/\s+/).filter(Boolean).length;
+    el.wordCount.textContent = `${words} word${words === 1 ? '' : 's'}`;
+  };
 
-        elements.engineInfo.innerHTML = `
-            <div class="engine-type">${info.name}</div>
-            <div class="engine-description">${info.description}</div>
-            <div class="engine-features">
-                ${info.features.map(f => `<span class="feature-badge">${f.replace('_', ' ')}</span>`).join('')}
-            </div>
-        `;
+  el.transcript.addEventListener('input', updateWordCount);
 
-        // Toggle file upload visibility based on engine support
-        const supportsFile = info.features.includes('file_transcription');
-        elements.uploadArea.parentElement.style.display = supportsFile ? 'block' : 'none';
-        
-        elements.engineSelector.value = info.id;
-    };
+  // ── Engine Manager ────────────────────────────────────────────────────
+  let manager = null;
 
-    elements.engineSelector.addEventListener('change', async (e) => {
-        try {
-            setStatus(`Switching to ${e.target.value}...`);
-            await manager.setEngine(e.target.value);
-            updateEngineUI();
-            setStatus(`Switched to ${e.target.value}`);
-        } catch (err) {
-            setStatus(`Failed to switch engine: ${err.message}`);
-        }
-    });
+  // Import engines so they self-register with the module registry
+  await Promise.allSettled([
+    import('./engines/webspeech-engine.js'),
+    import('./engines/whisper-engine.js'),
+    import('./engines/vosk-engine.js'),
+  ]);
+  const { default: ModularRecognitionManager } = await import('./modular-recognition-manager.js');
+  manager = new ModularRecognitionManager();
+  const engines = await manager.initializeEngines();
 
-    // --- Transcription Logic (New) ---
-    const handleRecognitionResult = (result) => {
-        if (result.isFinal) {
-            state.transcriptText += result.text + ' ';
-        }
-        
-        const fullText = state.transcriptText + (result.interim || '');
-        // Use Pretext for optimized text container updates
-        elements.transcriptArea.value = fullText;
-        
-        // Handle timed chunks if available
+  el.engineSelector.innerHTML = engines.map(e =>
+    `<option value="${e.id}">${e.icon || ''} ${e.name}</option>`
+  ).join('');
+
+  // Select best available engine — try in priority order, skip unavailable
+  const priorityOrder = ['webspeech', 'whisper', 'vosk'];
+  let engineReady = false;
+  for (const eid of priorityOrder) {
+    try {
+      await manager.setEngine(eid);
+      engineReady = true;
+      break;
+    } catch { /* engine not available, try next */ }
+  }
+  if (!engineReady) {
+    setStatus('No engines available — use Chrome/Edge on HTTPS for Web Speech API');
+  }
+
+  updateEngineUI();
+  el.recordBtn.disabled = false;
+
+  function updateEngineUI() {
+    const info = manager.getCurrentEngineInfo();
+    if (!info) return;
+    el.engineInfo.innerHTML = `
+      <div class="engine-info-name">${info.icon || ''} ${info.name}</div>
+      <div class="engine-info-desc">${info.description}</div>
+      <div class="engine-features">${info.features.map(f => `<span class="feature-badge">${f.replace(/_/g,' ')}</span>`).join('')}</div>
+    `;
+    const supportsFile = info.features.includes('file_transcription');
+    el.uploadSection.style.display = supportsFile ? 'block' : 'none';
+    el.engineSelector.value = info.id;
+    populateLanguages(info);
+  }
+
+  el.engineSelector.addEventListener('change', async e => {
+    try {
+      setStatus(`Switching to ${e.target.value}...`);
+      await manager.setEngine(e.target.value);
+      updateEngineUI();
+      showToast('Engine switched', 'success');
+    } catch (err) {
+      showToast(`Failed: ${err.message}`, 'error');
+    }
+  });
+
+  // ── Language Selector ─────────────────────────────────────────────────
+  function populateLanguages(info) {
+    const langs = info.languages || [];
+    if (!langs.length) {
+      el.languageSelector.innerHTML = '<option value="">No language options</option>';
+      el.languageSelector.disabled = true;
+      return;
+    }
+    el.languageSelector.disabled = false;
+    el.languageSelector.innerHTML = langs.map(l =>
+      `<option value="${l.code}">${l.name}</option>`
+    ).join('');
+    const stored = localStorage.getItem('vn-lang');
+    if (stored && langs.find(l => l.code === stored)) el.languageSelector.value = stored;
+  }
+
+  el.languageSelector.addEventListener('change', async e => {
+    const lang = e.target.value;
+    if (!lang) return;
+    localStorage.setItem('vn-lang', lang);
+    try {
+      await manager.setLanguage(lang);
+      showToast(`Language set to ${lang}`, 'info');
+    } catch (err) {
+      showToast(`Language not supported: ${err.message}`, 'warning');
+    }
+  });
+
+  // ── Recording ─────────────────────────────────────────────────────────
+
+  const startRecording = async () => {
+    state.isRecording = true;
+    state.transcriptText = '';
+    state.timedWords = [];
+    el.transcript.value = '';
+    el.timedTranscript.innerHTML = '<div class="history-empty">Recording…</div>';
+    el.recordBtnIcon.textContent = '⏹️';
+    el.recordBtnLabel.textContent = 'Stop';
+    el.recordBtn.classList.add('recording');
+    el.recordingDot.classList.add('active');
+    el.recordingStatus.textContent = 'Recording…';
+    timer.start();
+
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      waveform.start(micStream);
+    } catch (_) {}
+
+    await manager.start(
+      result => {
+        if (result.isFinal) state.transcriptText += result.text + ' ';
+        el.transcript.value = state.transcriptText + (result.interim || '');
+        updateWordCount();
         if (result.chunks) {
-            state.timedWords = [...state.timedWords, ...result.chunks];
-            renderTimedTranscript(state.timedWords);
+          state.timedWords = [...state.timedWords, ...result.chunks];
+          renderTimedTranscript(state.timedWords);
         }
-    };
+      },
+      err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
+      (status, data) => {
+        if (status === 'loading') updateProgress(true, data?.progress, `Loading: ${data?.file || '…'}`);
+        else if (status === 'ready') updateProgress(false);
+      }
+    );
+  };
 
-    const handleRecognitionError = (error) => {
-        setStatus(`Recognition Error: ${error}`);
-        stopRecognition();
-    };
+  const stopRecording = async () => {
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    waveform.stop();
+    timer.stop();
+    await manager.stop();
+    state.isRecording = false;
+    el.recordBtnIcon.textContent = '🎙️';
+    el.recordBtnLabel.textContent = 'Start Recording';
+    el.recordBtn.classList.remove('recording');
+    el.recordingDot.classList.remove('active');
+    el.recordingStatus.textContent = '';
+    setStatus('Stopped');
+    updateWordCount();
+  };
 
-    const handleRecognitionStatus = (status, data) => {
-        if (status === 'loading') {
-            updateProgress(true, data?.progress, `Loading Engine: ${data?.file || '...'}`);
-        } else if (status === 'ready') {
-            updateProgress(false);
-            setStatus('Engine Ready');
-        }
-    };
-
-    const stopRecognition = async () => {
-        await manager.stop();
+  el.recordBtn.addEventListener('click', async () => {
+    if (state.isRecording) { await stopRecording(); }
+    else {
+      try { await startRecording(); }
+      catch (err) {
         state.isRecording = false;
-        elements.recordBtn.textContent = 'Start Recording';
-        elements.recordBtn.classList.remove('recording');
-        elements.recordingStatus.textContent = '';
-        setStatus('Stopped');
+        el.recordBtn.classList.remove('recording');
+        el.recordBtnIcon.textContent = '🎙️';
+        el.recordBtnLabel.textContent = 'Start Recording';
+        el.recordingDot.classList.remove('active');
+        timer.stop();
+        waveform.stop();
+        showToast(`Error: ${err.message}`, 'error');
+      }
+    }
+  });
+
+  // ── Timed Transcript ──────────────────────────────────────────────────
+  const switchTab = tab => {
+    const isText = tab === 'text';
+    el.tabText.classList.toggle('active', isText);
+    el.tabTimed.classList.toggle('active', !isText);
+    el.tabText.setAttribute('aria-selected', isText);
+    el.tabTimed.setAttribute('aria-selected', !isText);
+    document.getElementById('transcriptTextView').style.display = isText ? 'block' : 'none';
+    el.timedTranscript.style.display = isText ? 'none' : 'block';
+  };
+  el.tabText.addEventListener('click', () => switchTab('text'));
+  el.tabTimed.addEventListener('click', () => switchTab('timed'));
+
+  function renderTimedTranscript(words) {
+    if (!words?.length) { el.timedTranscript.innerHTML = '<div class="history-empty">No interactive transcript.</div>'; return; }
+    el.timedTranscript.innerHTML = '';
+    words.forEach((w, i) => {
+      const span = document.createElement('span');
+      span.className = 'transcript-word';
+      span.textContent = w.word + ' ';
+      span.dataset.start = w.start;
+      span.dataset.end = w.end;
+      span.addEventListener('click', () => { el.audioPlayback.currentTime = w.start; el.audioPlayback.play(); });
+      el.timedTranscript.appendChild(span);
+    });
+  }
+
+  el.audioPlayback.addEventListener('timeupdate', () => {
+    const t = el.audioPlayback.currentTime;
+    el.timedTranscript.querySelectorAll('.transcript-word').forEach(span => {
+      const active = t >= parseFloat(span.dataset.start) && t <= parseFloat(span.dataset.end);
+      span.classList.toggle('active-word', active);
+      if (active) span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  });
+
+  // ── File Upload ───────────────────────────────────────────────────────
+  const setFile = file => {
+    if (!file) return;
+    state.selectedFile = file;
+    el.fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+    el.transcribeFileBtn.disabled = false;
+    el.audioPlayback.src = URL.createObjectURL(file);
+    el.audioPlayback.style.display = 'block';
+  };
+
+  el.uploadArea.addEventListener('click', () => el.audioFile.click());
+  el.uploadArea.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') el.audioFile.click(); });
+  el.audioFile.addEventListener('change', e => setFile(e.target.files[0]));
+  el.uploadArea.addEventListener('dragover', e => { e.preventDefault(); el.uploadArea.classList.add('dragover'); });
+  el.uploadArea.addEventListener('dragleave', () => el.uploadArea.classList.remove('dragover'));
+  el.uploadArea.addEventListener('drop', e => {
+    e.preventDefault(); el.uploadArea.classList.remove('dragover');
+    setFile(e.dataTransfer.files[0]);
+  });
+
+  el.transcribeFileBtn.addEventListener('click', async () => {
+    if (!state.selectedFile) return;
+    el.transcribeFileBtn.disabled = true;
+    updateProgress(true, 0, 'Preparing…');
+    try {
+      const result = await manager.transcribeFile(state.selectedFile, p => updateProgress(true, p.percent, p.status));
+      updateProgress(false);
+      el.transcript.value = result.text;
+      state.transcriptText = result.text;
+      if (result.chunks || result.words) {
+        state.timedWords = (result.chunks || result.words).map(c => ({
+          word: c.text || c.word,
+          start: c.timestamp ? c.timestamp[0] : c.start,
+          end: c.timestamp ? c.timestamp[1] : c.end
+        }));
+        renderTimedTranscript(state.timedWords);
+      }
+      updateWordCount();
+      showToast('Transcription complete!', 'success');
+    } catch (err) {
+      updateProgress(false);
+      showToast(`Transcription failed: ${err.message}`, 'error');
+    } finally {
+      el.transcribeFileBtn.disabled = false;
+    }
+  });
+
+  // ── Copy & Export ─────────────────────────────────────────────────────
+  el.copyTranscriptBtn.addEventListener('click', () => {
+    if (!el.transcript.value) return;
+    navigator.clipboard.writeText(el.transcript.value);
+    showToast('Transcript copied!', 'success');
+  });
+
+  el.copySummaryBtn.addEventListener('click', () => {
+    const txt = el.summary.textContent;
+    if (!txt) return;
+    navigator.clipboard.writeText(txt);
+    showToast('Summary copied!', 'success');
+  });
+
+  el.exportBtn.addEventListener('click', () => {
+    const open = el.exportMenu.classList.toggle('open');
+    el.exportBtn.setAttribute('aria-expanded', open);
+  });
+  document.addEventListener('click', e => {
+    if (!el.exportBtn.contains(e.target) && !el.exportMenu.contains(e.target)) {
+      el.exportMenu.classList.remove('open');
+      el.exportBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  const makeCurrentNote = () => ({
+    id: state.currentNote?.id,
+    title: el.sessionTitle.value || 'Untitled Note',
+    transcript: el.transcript.value,
+    summary: el.summary.textContent,
+    date: state.currentNote?.date || new Date().toISOString(),
+    engine: manager.getCurrentEngineInfo()?.id || 'unknown',
+  });
+
+  el.exportTxt.addEventListener('click', () => { exportNote(makeCurrentNote(), 'txt'); el.exportMenu.classList.remove('open'); });
+  el.exportMd.addEventListener('click',  () => { exportNote(makeCurrentNote(), 'md');  el.exportMenu.classList.remove('open'); });
+  el.exportJson.addEventListener('click',() => { exportNote(makeCurrentNote(), 'json');el.exportMenu.classList.remove('open'); });
+
+  // ── Summarizer ────────────────────────────────────────────────────────
+  let summarizerWorker = null;
+
+  el.sendToLLMBtn.addEventListener('click', () => {
+    const text = el.transcript.value.trim();
+    if (!text) { showToast('No transcript to summarize.', 'warning'); return; }
+    el.sendToLLMBtn.disabled = true;
+    updateProgress(true, 0, 'Warming up offline summarizer…');
+
+    if (!summarizerWorker) {
+      try { summarizerWorker = new Worker('engines/offline-summarizer-worker.js', { type: 'module' }); }
+      catch (e) { updateProgress(false); showToast('Could not start summarizer.', 'error'); el.sendToLLMBtn.disabled = false; return; }
+    }
+
+    const msgId = Date.now().toString();
+    const wordCount = text.split(/\s+/).length;
+    const maxLen = Math.min(300, Math.max(50, Math.floor(wordCount * 0.4)));
+    const minLen = Math.min(100, Math.max(10, Math.floor(wordCount * 0.1)));
+
+    const handler = e => {
+      if (e.data.id !== msgId) return;
+      if (e.data.status === 'progress') {
+        if (e.data.data?.status === 'progress') updateProgress(true, e.data.data.progress, `Downloading model: ${e.data.data.file}…`);
+        else if (e.data.data?.status === 'ready') updateProgress(true, 100, 'Model ready. Summarizing…');
+      } else if (e.data.status === 'processing') {
+        updateProgress(true, null, 'Generating summary offline…');
+      } else if (e.data.status === 'success') {
+        summarizerWorker.removeEventListener('message', handler);
+        updateProgress(false);
+        el.summary.innerHTML = `<p>${e.data.summary.replace(/\n/g, '<br>')}</p>`;
+        el.sendToLLMBtn.disabled = false;
+        const engineId = manager.getCurrentEngineInfo()?.id || 'unknown';
+        saveNote({
+          date: new Date().toISOString(),
+          title: el.sessionTitle.value || 'Note ' + new Date().toLocaleTimeString(),
+          transcript: text,
+          summary: e.data.summary,
+          engine: engineId,
+        }).then(() => { showToast('Note saved to history!', 'success'); renderHistory(); });
+      } else if (e.data.status === 'error') {
+        summarizerWorker.removeEventListener('message', handler);
+        updateProgress(false);
+        showToast(`Summarizer error: ${e.data.error}`, 'error');
+        el.sendToLLMBtn.disabled = false;
+      }
     };
 
-    elements.recordBtn.addEventListener('click', async () => {
-        if (state.isRecording) {
-            await stopRecognition();
-        } else {
-            try {
-                state.isRecording = true;
-                elements.recordBtn.textContent = 'Stop Recording';
-                elements.recordBtn.classList.add('recording');
-                elements.recordingStatus.textContent = 'Recording...';
-                
-                state.transcriptText = '';
-                elements.transcriptArea.value = '';
-                switchTranscriptTab('text');
+    summarizerWorker.addEventListener('message', handler);
+    summarizerWorker.postMessage({ action: 'summarize', text, max_length: maxLen, min_length: minLen, id: msgId });
+  });
 
-                await manager.start(
-                    handleRecognitionResult,
-                    handleRecognitionError,
-                    handleRecognitionStatus
-                );
-            } catch (err) {
-                state.isRecording = false;
-                elements.recordBtn.textContent = 'Start Recording';
-                elements.recordBtn.classList.remove('recording');
-                setStatus(`Error: ${err.message}`);
-            }
-        }
+  // ── History ───────────────────────────────────────────────────────────
+  let allNotes = [];
+
+  async function renderHistory() {
+    allNotes = await loadAllNotes();
+    applyHistoryFilter();
+  }
+
+  function applyHistoryFilter() {
+    const q = el.historySearch.value.toLowerCase();
+    const sort = el.historySort.value;
+    let notes = allNotes.filter(n =>
+      (n.title || '').toLowerCase().includes(q) ||
+      (n.transcript || '').toLowerCase().includes(q)
+    );
+    if (sort === 'date-desc') notes.sort((a, b) => b.date.localeCompare(a.date));
+    else if (sort === 'date-asc') notes.sort((a, b) => a.date.localeCompare(b.date));
+    else if (sort === 'title-asc') notes.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    renderHistoryCards(notes);
+  }
+
+  function renderHistoryCards(notes) {
+    if (!notes.length) {
+      el.historyGrid.innerHTML = '<div class="history-empty">No notes yet. Record something!</div>';
+      return;
+    }
+    el.historyGrid.innerHTML = notes.map(note => {
+      const date = new Date(note.date).toLocaleDateString() + ' ' +
+        new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const words = note.transcript ? note.transcript.trim().split(/\s+/).filter(Boolean).length : 0;
+      const safe = (s) => (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `
+        <div class="history-card" role="listitem" data-id="${note.id}">
+          <div class="history-card-info">
+            <div class="history-card-title" title="Click to load" data-id="${note.id}">${safe(note.title || 'Untitled')}</div>
+            <div class="history-card-meta">
+              <span class="history-card-date">${date}</span>
+              ${note.engine ? `<span class="engine-badge">${note.engine}</span>` : ''}
+              <span class="words-badge">${words} words</span>
+            </div>
+          </div>
+          <div class="history-card-actions">
+            <button class="btn-ghost load-note-btn" data-id="${note.id}" aria-label="Load note">Load</button>
+            <button class="btn-ghost export-note-btn" data-id="${note.id}" aria-label="Export note">⬇️</button>
+            <button class="btn-danger delete-note-btn" data-id="${note.id}" aria-label="Delete note">🗑️</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    el.historyGrid.querySelectorAll('.load-note-btn, .history-card-title').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        const id = Number(e.target.dataset.id);
+        const note = allNotes.find(n => n.id === id);
+        if (!note) return;
+        state.currentNote = note;
+        el.sessionTitle.value = note.title || '';
+        el.transcript.value = note.transcript || '';
+        state.transcriptText = note.transcript || '';
+        el.summary.innerHTML = note.summary ? `<p>${note.summary.replace(/\n/g, '<br>')}</p>` : '';
+        switchTab('text');
+        updateWordCount();
+        showToast(`Loaded: ${note.title}`, 'info');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     });
 
-    elements.transcribeFileBtn.addEventListener('click', async () => {
-        if (!state.selectedFile) return;
-
-        elements.transcribeFileBtn.disabled = true;
-        updateProgress(true, 0, 'Preparing transcription...');
-
-        try {
-            const result = await manager.transcribeFile(state.selectedFile, (progress) => {
-                updateProgress(true, progress.percent, progress.message);
-            });
-
-            updateProgress(false);
-            elements.transcriptArea.value = result.text;
-            
-            if (result.chunks) {
-                state.timedWords = result.chunks;
-                renderTimedTranscript(state.timedWords);
-            }
-            
-            setStatus('Transcription Complete');
-        } catch (err) {
-            updateProgress(false);
-            setStatus(`File Transcription Failed: ${err.message}`);
-        } finally {
-            elements.transcribeFileBtn.disabled = false;
-        }
+    el.historyGrid.querySelectorAll('.delete-note-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        const id = Number(e.target.dataset.id);
+        if (!confirm('Delete this note?')) return;
+        await deleteNote(id);
+        showToast('Note deleted', 'success');
+        renderHistory();
+      });
     });
 
-    setupManager();
-
-    // --- Transcript Tabs & Interactive View ---
-    const switchTranscriptTab = (tab) => {
-        if (tab === 'text') {
-            elements.tabText.classList.add('active');
-            elements.tabTimed.classList.remove('active');
-            elements.transcriptArea.style.display = 'block';
-            elements.timedTranscript.style.display = 'none';
-        } else {
-            elements.tabText.classList.remove('active');
-            elements.tabTimed.classList.add('active');
-            elements.transcriptArea.style.display = 'none';
-            elements.timedTranscript.style.display = 'block';
-        }
-    };
-
-    elements.tabText.addEventListener('click', () => switchTranscriptTab('text'));
-    elements.tabTimed.addEventListener('click', () => switchTranscriptTab('timed'));
-
-    const renderTimedTranscript = (words) => {
-        if (!words || words.length === 0) {
-            elements.timedTranscript.innerHTML = '<div class="timed-empty">No interactive transcript available.</div>';
-            return;
-        }
-
-        elements.timedTranscript.innerHTML = '';
-        words.forEach((w, index) => {
-            const span = document.createElement('span');
-            span.className = 'transcript-word';
-            span.textContent = w.word + ' ';
-            span.dataset.start = w.start;
-            span.dataset.end = w.end;
-            span.dataset.index = index;
-
-            span.addEventListener('click', () => {
-                elements.audioPlayback.currentTime = w.start;
-                elements.audioPlayback.play();
-            });
-
-            elements.timedTranscript.appendChild(span);
-        });
-    };
-
-    // Sync audio with timed transcript
-    elements.audioPlayback.addEventListener('timeupdate', () => {
-        const currentTime = elements.audioPlayback.currentTime;
-        const wordSpans = elements.timedTranscript.querySelectorAll('.transcript-word');
-
-        wordSpans.forEach(span => {
-            const start = parseFloat(span.dataset.start);
-            const end = parseFloat(span.dataset.end);
-            if (currentTime >= start && currentTime <= end) {
-                span.classList.add('active-word');
-                // Optional: auto-scroll to active word
-                span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } else {
-                span.classList.remove('active-word');
-            }
-        });
+    el.historyGrid.querySelectorAll('.export-note-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const id = Number(e.target.dataset.id);
+        const note = allNotes.find(n => n.id === id);
+        if (note) exportNote(note, 'md');
+      });
     });
+  }
 
-    // --- Offline Summarizer ---
-    let summarizerWorker = null;
-
-    elements.sendToLLMBtn.addEventListener('click', () => {
-        const text = elements.transcriptArea.value.trim();
-        if (!text) {
-            setStatus("No transcript to summarize.");
-            return;
-        }
-
-        elements.sendToLLMBtn.disabled = true;
-        updateProgress(true, 0, 'Warming up offline summarizer...');
-
-        if (!summarizerWorker) {
-            try {
-                summarizerWorker = new Worker('engines/offline-summarizer-worker.js', { type: 'module' });
-            } catch (e) {
-                updateProgress(false);
-                setStatus("Error starting summarizer worker.");
-                elements.sendToLLMBtn.disabled = false;
-                return;
-            }
-        }
-
-        const messageId = Date.now().toString();
-
-        const messageHandler = (e) => {
-            if (e.data.id !== messageId) return;
-
-            if (e.data.status === 'progress') {
-                if (e.data.data && e.data.data.status === 'progress') {
-                    updateProgress(true, e.data.data.progress, `Downloading Summary Model: ${e.data.data.file}...`);
-                } else if (e.data.data && e.data.data.status === 'ready') {
-                    updateProgress(true, 100, 'Model ready. Summarizing...');
-                }
-            } else if (e.data.status === 'processing') {
-                updateProgress(true, null, 'Generating summary offline... (This may take a moment)');
-            } else if (e.data.status === 'success') {
-                summarizerWorker.removeEventListener('message', messageHandler);
-                updateProgress(false);
-
-                const html = `<p>${e.data.summary.replace(/\n/g, '<br>')}</p>`;
-                elements.summary.innerHTML = html;
-                setStatus('Summary generated completely offline.');
-
-                // Save to IndexedDB
-                saveToHistory(text, e.data.summary, null, elements.sessionTitle.value || 'Offline Note ' + new Date().toLocaleTimeString());
-                renderHistory();
-
-                elements.sendToLLMBtn.disabled = false;
-            } else if (e.data.status === 'error') {
-                summarizerWorker.removeEventListener('message', messageHandler);
-                updateProgress(false);
-                setStatus(`Summarizer Error: ${e.data.error}`);
-                elements.sendToLLMBtn.disabled = false;
-            }
-        };
-
-        summarizerWorker.addEventListener('message', messageHandler);
-
-        const wordCount = text.split(/\s+/).length;
-        let maxLength = Math.max(50, Math.floor(wordCount * 0.4));
-        let minLength = Math.max(10, Math.floor(wordCount * 0.1));
-        if (maxLength > 300) maxLength = 300;
-        if (minLength > 100) minLength = 100;
-
-        summarizerWorker.postMessage({
-            action: 'summarize',
-            text: text,
-            max_length: maxLength,
-            min_length: minLength,
-            id: messageId
-        });
-    });
-
-    // --- IndexedDB History Logic ---
-    const openDB = () => {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open('voiceNotesDB', 1);
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains('history')) {
-                    db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
-                }
-            };
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-    };
-
-    const saveToHistory = async (transcript, summary, keyPoints, title) => {
-        const db = await openDB();
-        const tx = db.transaction('history', 'readwrite');
-        const store = tx.objectStore('history');
-        await store.add({ date: new Date().toISOString(), transcript, summary, keyPoints, title });
-        tx.oncomplete = () => db.close();
-    };
-
-    const loadHistory = async () => {
-        const db = await openDB();
-        const tx = db.transaction('history', 'readonly');
-        const store = tx.objectStore('history');
-        const req = store.getAll();
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                db.close();
-                resolve(req.result.sort((a, b) => b.date.localeCompare(a.date)));
-            };
-            req.onerror = () => { db.close(); reject(req.error); };
-        });
-    };
-
-    const renderHistory = async () => {
-        const items = await loadHistory();
-        if (!items || items.length === 0) {
-            elements.historyList.innerHTML = '<li style="padding: 10px; color: #718096; font-size: 0.9rem;">No history found.</li>';
-            return;
-        }
-
-        elements.historyList.innerHTML = items.map((item) => {
-            const safeTitle = item.title ? item.title.replace(/</g, '&lt;').replace(/>/g, '&gt;') : 'Untitled';
-            const date = new Date(item.date).toLocaleDateString() + ' ' + new Date(item.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return `
-        <li style="padding: 12px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between;">
-           <div>
-             <div style="font-weight: 600; color: #1976d2; font-size: 0.95rem;">${safeTitle}</div>
-             <div style="font-size: 0.8rem; color: #718096; margin-top: 4px;">${date}</div>
-           </div>
-           <button class="secondary-action" data-id="${item.id}" style="padding: 6px 12px; font-size: 0.8rem;">Load</button>
-        </li>
-      `;
-        }).join('');
-
-        // Quick load logic
-        elements.historyList.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const id = Number(e.target.dataset.id);
-                const note = (await loadHistory()).find(n => n.id === id);
-                if (note) {
-                    elements.sessionTitle.value = note.title;
-                    elements.transcriptArea.value = note.transcript;
-                    elements.summary.innerHTML = note.summary ? `<p>${note.summary.replace(/\n/g, '<br>')}</p>` : '';
-                    switchTranscriptTab('text');
-                    setStatus(`Loaded note: ${note.title}`);
-                }
-            });
-        });
-    };
-
-    // Copy Buttons
-    elements.copyTranscriptBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(elements.transcriptArea.value);
-        setStatus('Transcript copied!');
-    });
-
-    elements.copySummaryBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(elements.summary.textContent || elements.summary.innerText);
-        setStatus('Summary copied!');
-    });
-
-    // Init
+  el.historySearch.addEventListener('input', applyHistoryFilter);
+  el.historySort.addEventListener('change', applyHistoryFilter);
+  el.clearAllBtn.addEventListener('click', async () => {
+    if (!confirm('Delete ALL notes? This cannot be undone.')) return;
+    await clearAllNotes();
+    showToast('All notes cleared', 'success');
     renderHistory();
-};
+  });
 
-window.addEventListener('DOMContentLoaded', appSetup);
+  renderHistory();
+}
