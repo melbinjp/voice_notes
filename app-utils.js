@@ -1,24 +1,36 @@
 // ── Theme ──────────────────────────────────────────────────────────────
+// Resolves what theme is actually active (light or dark)
+export function resolveTheme(stored) {
+  if (stored === 'dark' || stored === 'light') return stored;
+  // 'system' or undefined → follow OS preference
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export function getStoredTheme() {
   return localStorage.getItem('vn-theme') || 'system';
 }
 
 export function applyTheme(theme) {
   localStorage.setItem('vn-theme', theme);
-  let resolved = theme;
-  if (theme === 'system') {
-    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  }
+  const resolved = resolveTheme(theme);
   document.documentElement.setAttribute('data-theme', resolved);
+
+  // Toggle button shows CURRENT state and hints at what clicking will do
   const btn = document.getElementById('themeToggleBtn');
-  if (btn) btn.textContent = resolved === 'dark' ? '☀️' : '🌙';
+  if (btn) {
+    btn.textContent = resolved === 'dark' ? '☀️' : '🌙';
+    btn.title = resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  }
+
+  // Settings dropdown stays in sync
   const sel = document.getElementById('themeSelect');
   if (sel) sel.value = theme;
 }
 
 export function toggleTheme() {
-  const current = getStoredTheme();
-  const resolved = document.documentElement.getAttribute('data-theme');
+  // Always flip the currently-resolved theme to the opposite
+  const resolved = document.documentElement.getAttribute('data-theme') || resolveTheme('system');
+  // Store the explicit choice (not 'system') so the toggle is sticky
   applyTheme(resolved === 'dark' ? 'light' : 'dark');
 }
 

@@ -10,6 +10,7 @@ class SummaryPipelineSingleton {
     static instance = null;
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
+            console.log(`[Summarizer Worker] Loading pipeline for Xenova/distilbart-cnn-6-6...`);
             // Using a fine-tuned DistilBART model that is performant inside the browser
             this.instance = pipeline('summarization', 'Xenova/distilbart-cnn-6-6', {
                 progress_callback
@@ -28,8 +29,29 @@ self.onmessage = async (e) => {
             self.postMessage({ status: 'loading', id });
 
             const summarizer = await SummaryPipelineSingleton.getInstance((data) => {
-                // Return progress for model download
-                self.postMessage({ status: 'progress', data, id });
+                if (data.status === 'progress') {
+                    const pct = typeof data.progress === 'number' ? Math.round(data.progress) : null;
+                    console.log(`[Summarizer Download] ${data.file || 'model'}: ${pct}% (${data.loaded}/${data.total} bytes)`);
+                    self.postMessage({
+                        status: 'progress',
+                        data: {
+                            status: 'progress',
+                            file: data.file || data.name || 'model',
+                            progress: pct,
+                            loaded: data.loaded || 0,
+                            total: data.total || 0,
+                        },
+                        id
+                    });
+                } else if (data.status === 'ready') {
+                    self.postMessage({
+                        status: 'progress',
+                        data: { status: 'ready' },
+                        id
+                    });
+                } else {
+                    self.postMessage({ status: 'progress', data, id });
+                }
             });
 
             // Send processing state
@@ -42,7 +64,6 @@ self.onmessage = async (e) => {
                 temperature: 0.7,
                 repetition_penalty: 1.2
             });
-
             // Return success
             self.postMessage({
                 status: 'success',
@@ -50,6 +71,34 @@ self.onmessage = async (e) => {
                 id
             });
 
+        } catch (error) {
+            self.postMessage({ status: 'error', error: error.message, id });
+        }
+    }
+
+    if (action === 'preload') {
+        try {
+            self.postMessage({ status: 'loading', id });
+            await SummaryPipelineSingleton.getInstance((data) => {
+                if (data.status === 'progress') {
+                    self.postMessage({
+                        status: 'progress',
+                        data: {
+                            status: 'progress',
+                            file: data.file || data.name || 'model',
+                            progress: typeof data.progress === 'number' ? Math.round(data.progress) : null,
+                            loaded: data.loaded || 0,
+                            total: data.total || 0,
+                        },
+                        id
+                    });
+                } else if (data.status === 'ready') {
+                    self.postMessage({ status: 'progress', data: { status: 'ready' }, id });
+                } else {
+                    self.postMessage({ status: 'progress', data, id });
+                }
+            });
+            self.postMessage({ status: 'preload_done', id });
         } catch (error) {
             self.postMessage({ status: 'error', error: error.message, id });
         }

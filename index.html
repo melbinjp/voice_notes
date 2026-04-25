@@ -85,6 +85,47 @@
       </div>
     </div>
 
+    <!-- AI Models Status Card -->
+    <div class="card" id="modelStatusCard" role="region" aria-label="AI model status">
+      <div class="section-header">
+        <span class="section-label">🧠 AI Models</span>
+        <button id="preloadModelsBtn" class="btn-ghost" style="font-size:0.78rem; padding:6px 12px;" aria-label="Preload all AI models">⬇️ Preload All</button>
+      </div>
+      <div class="model-status-grid" id="modelStatusGrid">
+        <!-- Whisper Model -->
+        <div class="model-card" id="whisperModelCard">
+          <div class="model-card-header">
+            <div class="model-card-icon">🎙️</div>
+            <div class="model-card-info">
+              <div class="model-card-name">Whisper Tiny (English)</div>
+              <div class="model-card-desc">Speech-to-text transcription · <code>Xenova/whisper-tiny.en</code></div>
+            </div>
+            <div class="model-readiness-badge" id="whisperReadiness" data-state="idle">Not loaded</div>
+          </div>
+          <div class="model-progress-area" id="whisperProgressArea" style="display:none;">
+            <div class="model-progress-file" id="whisperProgressFile">Downloading…</div>
+            <div class="progress-track"><div id="whisperProgressBar" class="progress-fill"></div></div>
+          </div>
+        </div>
+        <!-- Summarizer Model -->
+        <div class="model-card" id="summarizerModelCard">
+          <div class="model-card-header">
+            <div class="model-card-icon">📝</div>
+            <div class="model-card-info">
+              <div class="model-card-name">DistilBART CNN</div>
+              <div class="model-card-desc">Offline summarization · <code>Xenova/distilbart-cnn-6-6</code></div>
+            </div>
+            <div class="model-readiness-badge" id="summarizerReadiness" data-state="idle">Not loaded</div>
+          </div>
+          <div class="model-progress-area" id="summarizerProgressArea" style="display:none;">
+            <div class="model-progress-file" id="summarizerProgressFile">Downloading…</div>
+            <div class="progress-track"><div id="summarizerProgressBar" class="progress-fill"></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="model-cache-hint" id="modelCacheHint">Models are cached in your browser after first download. No data leaves your device.</p>
+    </div>
+
     <!-- Transcript Card -->
     <div class="card" role="region" aria-label="Transcript">
       <div class="section-header">

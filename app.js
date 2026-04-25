@@ -133,6 +133,15 @@ async function initApp() {
     historySearch: document.getElementById('historySearch'),
     historySort: document.getElementById('historySort'),
     clearAllBtn: document.getElementById('clearAllBtn'),
+    preloadModelsBtn: document.getElementById('preloadModelsBtn'),
+    whisperReadiness: document.getElementById('whisperReadiness'),
+    whisperProgressArea: document.getElementById('whisperProgressArea'),
+    whisperProgressFile: document.getElementById('whisperProgressFile'),
+    whisperProgressBar: document.getElementById('whisperProgressBar'),
+    summarizerReadiness: document.getElementById('summarizerReadiness'),
+    summarizerProgressArea: document.getElementById('summarizerProgressArea'),
+    summarizerProgressFile: document.getElementById('summarizerProgressFile'),
+    summarizerProgressBar: document.getElementById('summarizerProgressBar'),
   };
 
   const state = {
@@ -160,6 +169,34 @@ async function initApp() {
       el.progressBar.style.animation = 'pulse 1.5s infinite';
     }
     if (!show) { el.progressBar.style.animation = 'none'; el.progressBar.style.width = '0%'; }
+  };
+
+  const updateModelStatus = (model, status, data = null) => {
+    const badge = el[`${model}Readiness`];
+    const area = el[`${model}ProgressArea`];
+    const file = el[`${model}ProgressFile`];
+    const bar = el[`${model}ProgressBar`];
+    if (!badge) return;
+
+    if (status === 'loading') {
+      badge.textContent = 'Initializing…';
+      badge.dataset.state = 'downloading';
+    } else if (status === 'progress') {
+      area.style.display = 'block';
+      badge.textContent = 'Downloading…';
+      badge.dataset.state = 'downloading';
+      if (data?.file) file.textContent = `File: ${data.file}`;
+      if (data?.progress !== null) bar.style.width = `${data.progress}%`;
+    } else if (status === 'ready') {
+      badge.textContent = 'Ready';
+      badge.dataset.state = 'ready';
+      area.style.display = 'none';
+      console.log(`[AI Model] ${model} is ready.`);
+    } else if (status === 'error') {
+      badge.textContent = 'Error';
+      badge.dataset.state = 'error';
+      showToast(`${model} model error: ${data}`, 'error');
+    }
   };
 
   const updateWordCount = () => {
@@ -288,8 +325,15 @@ async function initApp() {
       },
       err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
       (status, data) => {
-        if (status === 'loading') updateProgress(true, data?.progress, `Loading: ${data?.file || '…'}`);
-        else if (status === 'ready') updateProgress(false);
+        if (status === 'loading') {
+          updateProgress(true, data?.progress, `Loading: ${data?.file || '…'}`);
+          updateModelStatus('whisper', 'loading');
+        } else if (status === 'progress') {
+          updateModelStatus('whisper', 'progress', data);
+        } else if (status === 'ready') {
+          updateProgress(false);
+          updateModelStatus('whisper', 'ready');
+        }
       }
     );
   };
@@ -387,7 +431,14 @@ async function initApp() {
     el.transcribeFileBtn.disabled = true;
     updateProgress(true, 0, 'Preparing…');
     try {
-      const result = await manager.transcribeFile(state.selectedFile, p => updateProgress(true, p.percent, p.status));
+      const result = await manager.transcribeFile(state.selectedFile, p => {
+        if (p.status === 'progress') {
+          updateModelStatus('whisper', 'progress', p);
+        } else if (p.status === 'ready') {
+          updateModelStatus('whisper', 'ready');
+        }
+        updateProgress(true, p.percent, p.status);
+      });
       updateProgress(false);
       el.transcript.value = result.text;
       state.transcriptText = result.text;
@@ -469,8 +520,14 @@ async function initApp() {
     const handler = e => {
       if (e.data.id !== msgId) return;
       if (e.data.status === 'progress') {
+        updateModelStatus('summarizer', 'progress', e.data.data);
         if (e.data.data?.status === 'progress') updateProgress(true, e.data.data.progress, `Downloading model: ${e.data.data.file}…`);
-        else if (e.data.data?.status === 'ready') updateProgress(true, 100, 'Model ready. Summarizing…');
+        else if (e.data.data?.status === 'ready') {
+          updateProgress(true, 100, 'Model ready. Summarizing…');
+          updateModelStatus('summarizer', 'ready');
+        }
+      } else if (e.data.status === 'loading') {
+        updateModelStatus('summarizer', 'loading');
       } else if (e.data.status === 'processing') {
         updateProgress(true, null, 'Generating summary offline…');
       } else if (e.data.status === 'success') {
@@ -496,6 +553,43 @@ async function initApp() {
 
     summarizerWorker.addEventListener('message', handler);
     summarizerWorker.postMessage({ action: 'summarize', text, max_length: maxLen, min_length: minLen, id: msgId });
+  });
+
+  // ── Preload ───────────────────────────────────────────────────────────
+  el.preloadModelsBtn.addEventListener('click', () => {
+    el.preloadModelsBtn.disabled = true;
+    showToast('Starting model preloading...', 'info');
+
+    // Preload Summarizer
+    if (!summarizerWorker) {
+      summarizerWorker = new Worker('engines/offline-summarizer-worker.js', { type: 'module' });
+      summarizerWorker.addEventListener('message', e => {
+        if (e.data.status === 'progress') updateModelStatus('summarizer', 'progress', e.data.data);
+        if (e.data.status === 'loading') updateModelStatus('summarizer', 'loading');
+        if (e.data.status === 'preload_done') updateModelStatus('summarizer', 'ready');
+      });
+    }
+    summarizerWorker.postMessage({ action: 'preload', id: 'preload-' + Date.now() });
+
+    // Preload Whisper (via engine if active)
+    manager.preloadEngine?.('whisper', (status, data) => {
+        updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
+        if (status === 'ready') updateModelStatus('whisper', 'ready');
+    }).catch(() => {
+        // Direct worker fallback if engine not initialized
+        const w = new Worker('engines/whisper-worker.js', { type: 'module' });
+        w.onmessage = e => {
+            if (e.data.status === 'progress') updateModelStatus('whisper', 'progress', e.data.data);
+            if (e.data.status === 'loading') updateModelStatus('whisper', 'loading');
+            if (e.data.status === 'preload_done' || e.data.status === 'ready') {
+                updateModelStatus('whisper', 'ready');
+                w.terminate();
+            }
+        };
+        w.postMessage({ action: 'preload', id: 'preload-whisper' });
+    });
+
+    setTimeout(() => { el.preloadModelsBtn.disabled = false; }, 2000);
   });
 
   // ── History ───────────────────────────────────────────────────────────

@@ -657,14 +657,104 @@ footer a { color: inherit; text-decoration: none; }
 footer a:hover { color: var(--primary); }
 .footer-links { display: flex; justify-content: center; gap: 20px; margin-top: 8px; }
 
-/* ── Model download status ── */
-.model-status {
-  font-size: 0.83rem;
+/* ── AI Model Status Cards ── */
+.model-status-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  transition: var(--transition);
+}
+.model-card:hover { border-color: var(--primary); }
+
+.model-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.model-card-icon { font-size: 1.5rem; flex-shrink: 0; }
+
+.model-card-info { flex: 1; min-width: 0; }
+.model-card-name { font-weight: 700; font-size: 0.92rem; color: var(--text); }
+.model-card-desc { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+.model-card-desc code {
+  font-size: 0.72rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* Readiness badge */
+.model-readiness-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+.model-readiness-badge[data-state="idle"] {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.model-readiness-badge[data-state="downloading"] {
+  background: rgba(245,158,11,0.15);
+  color: var(--warning);
+  border: 1px solid rgba(245,158,11,0.3);
+  animation: pulse-badge 1.2s infinite;
+}
+.model-readiness-badge[data-state="ready"] {
+  background: rgba(16,185,129,0.15);
+  color: var(--accent);
+  border: 1px solid rgba(16,185,129,0.3);
+}
+.model-readiness-badge[data-state="cached"] {
+  background: rgba(99,102,241,0.12);
   color: var(--primary);
-  background: var(--primary-glow);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
-  margin-top: 8px;
+  border: 1px solid var(--primary-glow);
+}
+.model-readiness-badge[data-state="error"] {
+  background: rgba(239,68,68,0.12);
+  color: var(--danger);
+  border: 1px solid rgba(239,68,68,0.3);
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+/* Progress within model card */
+.model-progress-area {
+  margin-top: 10px;
+}
+.model-progress-file {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-cache-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 12px;
+  text-align: center;
+  font-style: italic;
 }
 
 /* ── Responsive ── */
