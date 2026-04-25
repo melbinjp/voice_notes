@@ -1,107 +1,86 @@
-# Voice Notes PWA (AudioPen/VoicePen-like)
+# 🎤 Voice Notes — Private & Offline PWA
 
-A modern, installable, mobile-friendly Progressive Web App for voice notes. Record audio, transcribe speech, summarize via a Cloudflare Worker (Facebook BART), and manage your notes with a beautiful, responsive UI. Works offline, supports install as a PWA, and can be converted to an Android APK.
-
----
-
-## Features
-- **Audio Recording & Transcription**: Record and transcribe voice notes using the Web Speech API.
-- **Summarization**: Summarize transcripts via a Cloudflare Worker backend (Facebook BART model).
-- **IndexedDB History**: All notes are saved locally and can be exported or deleted.
-- **Modern, Responsive UI**: Compact, touch-friendly, and sidebar-free. History is at the bottom as a dropdown list.
-- **PWA**: Installable on desktop/mobile, works offline, and supports add-to-home-screen.
-- **APK Ready**: Easily convert to an Android APK using PWABuilder.
+A professional, production-grade Progressive Web App (PWA) for voice notes. Record, transcribe, and summarize your voice notes with **100% privacy and zero cloud dependency**. Everything happens locally in your browser using cutting-edge AI.
 
 ---
 
-## Getting Started
+## 🌟 Key Features
 
-### 1. Clone & Deploy
-```sh
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
-```
-
-### 2. Structure
-- `index.html` — Main HTML file
-- `style.css` — App styles
-- `app.js` — Main app logic
-- `manifest.json` — PWA manifest
-- `service-worker.js` — Offline support
-- `worker.js` — Example Cloudflare Worker backend for summarization (not used in the frontend, but provided for reference if you want to deploy your own summarization backend). See the section below for details.
-- `screenshot-1.png` — Example screenshot for manifest and store listing
-- `README.md`, `LICENSE`
-
-### 3. Run Locally
-Just open `index.html` in your browser. For full PWA features, use a local server:
-```sh
-# Python 3
-python -m http.server 8080
-# Or use VS Code Live Server extension
-```
-
-### 4. Deploy to GitHub Pages
-- Push all files to your GitHub repo (root or `/docs` folder).
-- In repo settings, enable GitHub Pages (root or `/docs`).
-- Your app will be live at: `https://<username>.github.io/<repo>/`
-- All asset paths are relative for GitHub Pages compatibility.
-- Add an empty `.nojekyll` file to the root if you use folders with underscores.
-
-### 5. Install as a PWA
-- Visit your GitHub Pages URL in Chrome/Edge/Firefox (desktop or mobile).
-- Click the install prompt or use browser menu: "Install App".
-
-### 6. Convert to Android APK
-- Go to [PWABuilder](https://www.pwabuilder.com/)
-- Enter your GitHub Pages URL.
-- Download the generated APK and distribute or upload to Play Store.
+- **🛡️ Total Privacy**: All transcriptions and summaries are processed **offline** on your device. No audio or text ever leaves your browser.
+- **🎙️ Advanced Transcription**:
+  - **Web Speech API**: High-speed, system-native transcription.
+  - **OpenAI Whisper (Offline)**: High-accuracy, transformer-based transcription running via WASM.
+  - **Vosk**: Fallback engine for maximum compatibility.
+- **🧠 Local Summarization**: Generate concise summaries using the `DistilBART` model running locally via Transformers.js.
+- **📊 AI Model Status Tracking**: Real-time progress bars and readiness badges show exactly when models are downloading and cached.
+- **📈 Professional UX**:
+  - **Live Waveform**: Visual feedback while recording.
+  - **Recording Timer**: Precise duration tracking.
+  - **Interactive Transcript**: Click any word to play back the audio from that moment.
+  - **Toast Notifications**: Modern, non-intrusive status alerts.
+- **📚 History Management**: Fully searchable and sortable local database (IndexedDB) for all your notes.
+- **🌓 Adaptive Themes**: Seamless support for Light, Dark, and System-default themes with a sticky toggle.
+- **📱 PWA Ready**: Installable on Desktop, iOS, and Android. Works offline once AI models are cached.
 
 ---
 
-## Customization
-- Update `manifest.json` for your app name, icons, and theme color.
-- Update `README.md` and `LICENSE` as needed.
-- Backend summarization endpoint is set in `app.js` (`endpoint` variable).
+## 🚀 Getting Started
+
+### 1. Run Locally
+This is a **pure static repository** with zero build requirements. To run it locally:
+1. Clone the repo.
+2. Open `index.html` using a local server (e.g., VS Code Live Server or `npx serve .`).
+   > **Note**: A local server is required for Web Workers and AI models to function correctly.
+
+### 2. Deploy to GitHub Pages
+1. Push this repository to GitHub.
+2. Go to **Settings > Pages**.
+3. Select the `main` branch and the `/ (root)` folder.
+4. Your app is now live at `https://<username>.github.io/<repo-name>/`.
+
+### 3. PWA Installation
+Once live, visit the URL on your phone or desktop and select **"Add to Home Screen"** or **"Install"** from the browser menu.
 
 ---
 
-## Best Practices
-- Use a `.gitignore` to exclude OS/editor files (see below).
-- Keep all code and assets in the repo for easy deployment.
-- Use Issues and Discussions for feedback and improvements.
+## 🧠 How the AI Works
+
+The app utilizes **Transformers.js** to run heavy machine learning models inside Web Workers:
+- **Transcription**: Uses `Xenova/whisper-tiny.en` (~40MB).
+- **Summarization**: Uses `Xenova/distilbart-cnn-6-6` (~300MB).
+
+**First Load**: The first time you use a specific engine or summarize, the models will download from Hugging Face. 
+**Caching**: Once downloaded, models are cached in your browser's IndexedDB. Subsequent uses are instantaneous and work fully offline.
 
 ---
 
-## .gitignore Example
-```
-.DS_Store
-Thumbs.db
-node_modules/
-*.log
-```
+## ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Space` | Start / Stop Recording |
+| `Ctrl + Shift + C` | Copy Transcript |
+| `Ctrl + Shift + T` | Toggle Theme |
+| `Ctrl + ,` | Open Settings |
+| `Escape` | Close Modals |
 
 ---
 
-## Cloudflare Worker Backend (Optional)
+## 🛠️ Tech Stack
 
-This repo includes a sample `worker.js` file for a Cloudflare Worker that provides backend summarization using Facebook BART. This is **not used directly in the frontend**—the deployed app uses the endpoint set in `app.js` (by default, the author's Cloudflare Worker). If you want to deploy your own backend:
-
-1. Copy `worker.js` to your own Cloudflare Worker project.
-2. Set up the Facebook BART model on Cloudflare (see [Cloudflare AI Docs](https://developers.cloudflare.com/workers-ai/models/)).
-3. Deploy your Worker and update the `endpoint` variable in `app.js` to your new URL.
-
----
-
-## License
-MIT (see LICENSE)
+- **Frontend**: Vanilla JS (ES6+), HTML5, CSS3.
+- **AI Engines**: Transformers.js, Web Speech API, Vosk.
+- **Storage**: IndexedDB for history and model caching.
+- **PWA**: Service Workers with cache-first strategy.
 
 ---
 
-## Credits
-- UI/UX inspired by AudioPen/VoicePen
-- Summarization via Facebook BART (Cloudflare Worker)
+## 📄 License
+MIT License. Free to use and modify.
 
 ---
 
-## Contributing
-Pull requests and issues are welcome!
+## 🤝 Credits
+- UI/UX inspired by modern voice-to-text tools.
+- AI Models powered by [Xenova / Transformers.js](https://huggingface.co/Xenova).
+- Offline speech recognition via [Vosk-browser](https://github.com/alphacep/vosk-browser).
