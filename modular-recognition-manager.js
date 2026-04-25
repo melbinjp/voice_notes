@@ -75,6 +75,34 @@ class ModularRecognitionManager {
     }
   }
 
+  // Preload an engine's models/data
+  async preloadEngine(engineId, onStatus) {
+    try {
+      // If the engine is already the current one, use it
+      let engine = this.currentEngine;
+      if (!engine || engine.id !== engineId) {
+        const metadata = moduleRegistry.getModuleMetadata(engineId);
+        if (!metadata) throw new Error(`Engine '${engineId}' not found`);
+        
+        // We create a temporary instance just for preloading if it's not current
+        engine = await moduleRegistry.createModule(engineId);
+        await engine.initialize();
+      }
+
+      if (engine.preload) {
+        return await engine.preload(onStatus);
+      } else {
+        console.warn(`Engine ${engineId} does not support preloading`);
+        if (onStatus) onStatus('ready');
+        return true;
+      }
+    } catch (error) {
+      console.error(`Preload failed for ${engineId}:`, error);
+      if (onStatus) onStatus('error', error.message);
+      throw error;
+    }
+  }
+
   // Start recognition
   async start(onResult, onError, onStatus) {
     if (!this.currentEngine) {

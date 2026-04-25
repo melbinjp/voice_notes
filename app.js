@@ -258,6 +258,15 @@ async function initApp() {
       setStatus(`Switching to ${e.target.value}...`);
       await manager.setEngine(e.target.value);
       updateEngineUI();
+      
+      // If switching to Whisper, proactively start preloading to show progress
+      if (e.target.value === 'whisper') {
+        manager.preloadEngine('whisper', (status, data) => {
+          updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
+          if (status === 'ready') updateModelStatus('whisper', 'ready');
+        }).catch(err => console.error('Switch-time preload failed:', err));
+      }
+      
       showToast('Engine switched', 'success');
     } catch (err) {
       showToast(`Failed: ${err.message}`, 'error');
@@ -431,9 +440,10 @@ async function initApp() {
     updateProgress(true, 0, 'Preparing…');
     try {
       const result = await manager.transcribeFile(state.selectedFile, p => {
-        if (p.status === 'progress') {
-          updateModelStatus('whisper', 'progress', p);
-        } else if (p.status === 'ready') {
+        // p = { percent, status, data }
+        if (p.data?.status === 'progress') {
+          updateModelStatus('whisper', 'progress', p.data);
+        } else if (p.data?.status === 'ready') {
           updateModelStatus('whisper', 'ready');
         }
         updateProgress(true, p.percent, p.status);
@@ -570,12 +580,13 @@ async function initApp() {
     }
     summarizerWorker.postMessage({ action: 'preload', id: 'preload-' + Date.now() });
 
-    // Preload Whisper (via engine if active)
-    manager.preloadEngine?.('whisper', (status, data) => {
+    // Preload Whisper (via engine manager)
+    manager.preloadEngine('whisper', (status, data) => {
         updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
         if (status === 'ready') updateModelStatus('whisper', 'ready');
-    }).catch(() => {
-        // Direct worker fallback if engine not initialized
+    }).catch(err => {
+        console.warn('Manager preload failed, trying fallback...', err);
+        // Direct worker fallback if engine manager fails
         const w = new Worker('engines/whisper-worker.js', { type: 'module' });
         w.onmessage = e => {
             if (e.data.status === 'progress') updateModelStatus('whisper', 'progress', e.data.data);

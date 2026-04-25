@@ -106,13 +106,10 @@ class WhisperEngine {
                     if (e.data.id !== messageId) return;
 
                     if (e.data.status === 'progress' && onProgress) {
-                        // Transformers.js progress callback
-                        // e.data.data = { status: "progress", name: "...", progress: 50 }
                         if (e.data.data && e.data.data.status === 'progress') {
-                            // Model downloading
-                            onProgress({ percent: e.data.data.progress, status: `Downloading Model: ${e.data.data.file}...` });
+                            onProgress({ percent: e.data.data.progress, status: `Downloading Model: ${e.data.data.file}...`, data: e.data.data });
                         } else if (e.data.data && e.data.data.status === 'ready') {
-                            onProgress({ percent: 100, status: 'Model ready. Starting transcription...' });
+                            onProgress({ percent: 100, status: 'Model ready. Starting transcription...', data: e.data.data });
                         }
                     } else if (e.data.status === 'transcribing' && onProgress) {
                         onProgress({ percent: null, status: 'Whisper is transcribing audio... (This may take a while)' });
@@ -163,6 +160,36 @@ class WhisperEngine {
             console.error('Whisper file transcription failed:', error);
             throw error;
         }
+    }
+
+    async preload(onStatus) {
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+
+        return new Promise((resolve, reject) => {
+            const messageId = 'preload-' + Date.now();
+            const messageHandler = (e) => {
+                if (e.data.id !== messageId) return;
+
+                if (e.data.status === 'progress') {
+                    if (onStatus) onStatus('progress', e.data.data);
+                } else if (e.data.status === 'loading') {
+                    if (onStatus) onStatus('loading');
+                } else if (e.data.status === 'preload_done' || e.data.status === 'ready') {
+                    this.worker.removeEventListener('message', messageHandler);
+                    if (onStatus) onStatus('ready');
+                    resolve(true);
+                } else if (e.data.status === 'error') {
+                    this.worker.removeEventListener('message', messageHandler);
+                    if (onStatus) onStatus('error', e.data.error);
+                    reject(new Error(e.data.error));
+                }
+            };
+
+            this.worker.addEventListener('message', messageHandler);
+            this.worker.postMessage({ action: 'preload', id: messageId });
+        });
     }
 
     // Not implementing real-time for Whisper yet due to processing latency in browser
