@@ -47,7 +47,17 @@ class WhisperEngine {
             ],
             maxFileSize: 100 * 1024 * 1024, // 100MB
             languages: [
-                { code: 'en', name: 'English', model: 'Xenova/whisper-tiny.en' }
+                { code: 'auto', name: 'Automatic Detection' },
+                { code: 'en', name: 'English' },
+                { code: 'es', name: 'Spanish' },
+                { code: 'fr', name: 'French' },
+                { code: 'de', name: 'German' },
+                { code: 'it', name: 'Italian' },
+                { code: 'pt', name: 'Portuguese' },
+                { code: 'nl', name: 'Dutch' },
+                { code: 'ru', name: 'Russian' },
+                { code: 'zh', name: 'Chinese' },
+                { code: 'ja', name: 'Japanese' }
             ]
         };
     }
@@ -58,6 +68,8 @@ class WhisperEngine {
 
     async initialize() {
         if (this.isInitialized) return true;
+
+        this.language = 'auto'; // default
 
         try {
             console.log('Initializing Whisper engine...');
@@ -190,6 +202,7 @@ class WhisperEngine {
                 // Send to worker
                 this.worker.postMessage({
                     action: 'transcribe',
+                    language: this.language,
                     audioData: audioData,
                     sampleRate: 16000,
                     id: messageId
@@ -234,9 +247,13 @@ class WhisperEngine {
 
     // Not implementing real-time for Whisper yet due to processing latency in browser
     async start(onResult, onError, onStatus) {
-        throw new Error("Real-time microphone transcription is not yet supported for Whisper in browser.");
+        throw new Error("Real-time microphone transcription is not available in whisper mode. Actually the recording can happen in whisper mode as it can be transcribed later also right");
     }
     async stop() { }
+
+    async setLanguage(languageCode) {
+        this.language = languageCode;
+    }
 
     // Get engine information
     getInfo() {

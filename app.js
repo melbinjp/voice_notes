@@ -69,8 +69,10 @@ function closeAllModals() {
 // ── Keyboard Shortcuts ───────────────────────────────────────────────────
 function initKeyboardShortcuts() {
   document.addEventListener('keydown', e => {
-    const tag = document.activeElement.tagName;
-    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    const activeEl = document.activeElement;
+    const tag = activeEl.tagName;
+    const isContentEditable = activeEl.isContentEditable;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || isContentEditable;
 
     if (e.key === 'Escape') { closeAllModals(); return; }
 
@@ -426,7 +428,8 @@ async function initApp() {
       span.addEventListener('input', (e) => {
         w.word = span.textContent.trim();
         // Update main transcript text as well
-        el.transcript.value = words.map(word => word.word).join(' ');
+        // make sure words array is kept in sync
+        el.transcript.value = words.map(word => word.word).filter(w => w.length > 0).join(' ');
         state.transcriptText = el.transcript.value;
       });
 
