@@ -776,3 +776,4 @@ footer a:hover { color: var(--primary); }
   .history-card-actions { width: 100%; }
   .history-card-actions button { flex: 1; justify-content: center; }
 }
+.sticky-audio { position: sticky; top: 12px; z-index: 100; }
