@@ -5,6 +5,10 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
+// Optimize for webgl/gpu
+env.backends.onnx.wasm.numThreads = Math.max(1, (navigator.hardwareConcurrency || 1) - 1);
+
+
 // Pipeline instance
 class SummaryPipelineSingleton {
     static instance = null;
@@ -13,7 +17,13 @@ class SummaryPipelineSingleton {
             console.log(`[Summarizer Worker] Loading pipeline for Xenova/distilbart-cnn-6-6...`);
             // Using a fine-tuned DistilBART model that is performant inside the browser
             this.instance = pipeline('summarization', 'Xenova/distilbart-cnn-6-6', {
-                progress_callback
+                progress_callback,
+                device: (navigator.gpu ? 'webgpu' : 'wasm') // Use webgpu if supported, otherwise wasm
+            }).catch(err => {
+                console.warn("WebGPU not supported, falling back to WebGL/WASM", err);
+                return pipeline('summarization', 'Xenova/distilbart-cnn-6-6', {
+                    progress_callback
+                });
             });
         }
         return this.instance;
@@ -30,7 +40,7 @@ self.onmessage = async (e) => {
 
             const summarizer = await SummaryPipelineSingleton.getInstance((data) => {
                 if (data.status === 'progress') {
-                    const pct = typeof data.progress === 'number' ? Math.round(data.progress) : null;
+                    const pct = typeof data.progress === 'number' ? Math.round(data.progress) : (data.progress !== undefined ? data.progress : null);
                     console.log(`[Summarizer Download] ${data.file || 'model'}: ${pct}% (${data.loaded}/${data.total} bytes)`);
                     self.postMessage({
                         status: 'progress',
@@ -86,7 +96,7 @@ self.onmessage = async (e) => {
                         data: {
                             status: 'progress',
                             file: data.file || data.name || 'model',
-                            progress: typeof data.progress === 'number' ? Math.round(data.progress) : null,
+                            progress: typeof data.progress === 'number' ? Math.round(data.progress) : (data.progress !== undefined ? data.progress : null),
                             loaded: data.loaded || 0,
                             total: data.total || 0,
                         },

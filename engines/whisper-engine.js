@@ -93,7 +93,15 @@ class WhisperEngine {
 
             // Use Web Audio API to decode
             const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-            const decodedData = await audioContext.decodeAudioData(arrayBuffer);
+
+            let decodedData;
+            try {
+                decodedData = await audioContext.decodeAudioData(arrayBuffer);
+            } catch (e) {
+                if (onProgress) onProgress({ percent: 0, status: 'Error decoding audio data.' });
+                throw e;
+            }
+
             audioData = decodedData.getChannelData(0); // Get mono float32 array
 
             if (onProgress) onProgress({ percent: 20, status: 'Initializing Whisper parameters...' });
@@ -107,6 +115,7 @@ class WhisperEngine {
 
                     if (e.data.status === 'progress' && onProgress) {
                         if (e.data.data && e.data.data.status === 'progress') {
+                            if (e.data.data.progress === undefined) return;
                             onProgress({ percent: e.data.data.progress, status: `Downloading Model: ${e.data.data.file}...`, data: e.data.data });
                         } else if (e.data.data && e.data.data.status === 'ready') {
                             onProgress({ percent: 100, status: 'Model ready. Starting transcription...', data: e.data.data });
