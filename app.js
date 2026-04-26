@@ -159,6 +159,7 @@ async function initApp() {
   const setStatus = msg => { el.statusBar.textContent = msg; };
 
   const updateProgress = (show, pct = null, label = null) => {
+    if (pct === undefined) pct = null;
     el.progressContainer.style.display = show ? 'block' : 'none';
     if (label) el.progressLabel.textContent = label;
     if (pct !== null) {
@@ -186,7 +187,7 @@ async function initApp() {
       badge.textContent = 'Downloading…';
       badge.dataset.state = 'downloading';
       if (data?.file) file.textContent = `File: ${data.file}`;
-      if (data?.progress !== null) bar.style.width = `${data.progress}%`;
+      if (data?.progress !== null && data?.progress !== undefined) bar.style.width = `${data.progress}%`;
     } else if (status === 'ready') {
       badge.textContent = 'Ready';
       badge.dataset.state = 'ready';
@@ -334,7 +335,7 @@ async function initApp() {
       err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
       (status, data) => {
         if (status === 'loading') {
-          updateProgress(true, data?.progress, `Loading: ${data?.file || '…'}`);
+          updateProgress(true, (data?.progress !== undefined) ? data.progress : null, `Loading: ${data?.file || '…'}`);
           updateModelStatus('whisper', 'loading');
         } else if (status === 'progress') {
           updateModelStatus('whisper', 'progress', data);
@@ -530,7 +531,7 @@ async function initApp() {
       if (e.data.id !== msgId) return;
       if (e.data.status === 'progress') {
         updateModelStatus('summarizer', 'progress', e.data.data);
-        if (e.data.data?.status === 'progress') updateProgress(true, e.data.data.progress, `Downloading model: ${e.data.data.file}…`);
+        if (e.data.data?.status === 'progress' && e.data.data?.progress !== undefined) updateProgress(true, e.data.data.progress, `Downloading model: ${e.data.data.file}…`);
         else if (e.data.data?.status === 'ready') {
           updateProgress(true, 100, 'Model ready. Summarizing…');
           updateModelStatus('summarizer', 'ready');

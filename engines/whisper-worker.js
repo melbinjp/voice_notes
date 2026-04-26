@@ -5,6 +5,10 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
+// Optimize for webgl/gpu
+env.backends.onnx.wasm.numThreads = Math.max(1, (navigator.hardwareConcurrency || 1) - 1);
+
+
 // Pipeline instance
 class PipelineSingleton {
     static instance = null;
@@ -12,7 +16,13 @@ class PipelineSingleton {
         if (this.instance === null) {
             console.log(`[Whisper Worker] Loading pipeline for Xenova/whisper-tiny.en...`);
             this.instance = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
-                progress_callback
+                progress_callback,
+                device: (navigator.gpu ? 'webgpu' : 'wasm') // Use webgpu if supported, otherwise wasm
+            }).catch(err => {
+                console.warn("WebGPU not supported, falling back to WebGL/WASM", err);
+                return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                    progress_callback
+                });
             });
         }
         return this.instance;
@@ -46,7 +56,7 @@ self.onmessage = async (e) => {
             const transcriber = await PipelineSingleton.getInstance((data) => {
                 // Transformers.js progress: {status, file, progress, loaded, total, name}
                 if (data.status === 'progress') {
-                    const pct = typeof data.progress === 'number' ? Math.round(data.progress) : null;
+                    const pct = typeof data.progress === 'number' ? Math.round(data.progress) : (data.progress !== undefined ? data.progress : null);
                     console.log(`[Whisper Download] ${data.file || 'model'}: ${pct}% (${data.loaded}/${data.total} bytes)`);
                     self.postMessage({
                         status: 'progress',
@@ -123,7 +133,7 @@ self.onmessage = async (e) => {
                         data: {
                             status: 'progress',
                             file: data.file || data.name || 'model',
-                            progress: typeof data.progress === 'number' ? Math.round(data.progress) : null,
+                            progress: typeof data.progress === 'number' ? Math.round(data.progress) : (data.progress !== undefined ? data.progress : null),
                             loaded: data.loaded || 0,
                             total: data.total || 0,
                         },
