@@ -14,6 +14,14 @@ class WhisperEngine {
         this.lastResultTime = 0;
         this.deduplicationWindow = 2000;
         this.similarityThreshold = 0.8;
+
+        // Mic recording state
+        this._mediaRecorder = null;
+        this._audioChunks = [];
+        this._onResult = null;
+        this._onError = null;
+        this._onStatus = null;
+        this._micStream = null;
     }
 
     // Metadata for module registry
@@ -30,6 +38,7 @@ class WhisperEngine {
             isOnline: false,
             features: [
                 'file_transcription',
+                'microphone_recording',
                 'offline_processing',
                 'high_accuracy',
                 'quality_management'
@@ -245,11 +254,128 @@ class WhisperEngine {
         });
     }
 
-    // Not implementing real-time for Whisper yet due to processing latency in browser
+    // Record audio via microphone, then transcribe with Whisper on stop
     async start(onResult, onError, onStatus) {
-        throw new Error("Real-time microphone transcription is not available in whisper mode. Actually the recording can happen in whisper mode as it can be transcribed later also right");
+        if (!this.isInitialized) await this.initialize();
+
+        this._onResult = onResult;
+        this._onError = onError;
+        this._onStatus = onStatus;
+        this._audioChunks = [];
+
+        try {
+            this._micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+            if (onError) onError('Microphone access denied: ' + err.message);
+            return;
+        }
+
+        // Pick a supported MIME type
+        const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+        const mimeType = mimeTypes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+        this._mediaRecorder = new MediaRecorder(this._micStream, mimeType ? { mimeType } : {});
+
+        this._mediaRecorder.ondataavailable = e => {
+            if (e.data && e.data.size > 0) this._audioChunks.push(e.data);
+        };
+
+        this._mediaRecorder.onstop = async () => {
+            // Stop mic tracks
+            if (this._micStream) {
+                this._micStream.getTracks().forEach(t => t.stop());
+                this._micStream = null;
+            }
+
+            if (!this._audioChunks.length) return;
+
+            const blob = new Blob(this._audioChunks, { type: mimeType || 'audio/webm' });
+            this._audioChunks = [];
+
+            // Notify UI that transcription is starting
+            if (this._onStatus) this._onStatus('loading');
+
+            try {
+                // Decode audio to PCM
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const decodedData = await audioContext.decodeAudioData(arrayBuffer);
+                const audioData = decodedData.getChannelData(0);
+
+                const result = await new Promise((resolve, reject) => {
+                    const messageId = Date.now().toString();
+                    const handler = e => {
+                        if (e.data.id !== messageId) return;
+                        if (e.data.status === 'progress') {
+                            if (this._onStatus) this._onStatus('progress', e.data.data);
+                        } else if (e.data.status === 'transcribing') {
+                            if (this._onStatus) this._onStatus('transcribing');
+                        } else if (e.data.status === 'success') {
+                            this.worker.removeEventListener('message', handler);
+                            resolve(e.data);
+                        } else if (e.data.status === 'error') {
+                            this.worker.removeEventListener('message', handler);
+                            reject(new Error(e.data.error));
+                        }
+                    };
+                    this.worker.addEventListener('message', handler);
+                    this.worker.postMessage({
+                        action: 'transcribe',
+                        language: this.language || 'auto',
+                        audioData,
+                        sampleRate: 16000,
+                        id: messageId
+                    });
+                });
+
+                if (this._onStatus) this._onStatus('ready');
+
+                // Build consolidated text and word timestamps
+                let words = [];
+                let text = '';
+                if (result.chunks) {
+                    let lastWord = null;
+                    result.chunks.forEach(chunk => {
+                        const wordStr = chunk.text.trim().toLowerCase().replace(/[.,!?]/g, '');
+                        if (lastWord) {
+                            const lastStr = lastWord.word.trim().toLowerCase().replace(/[.,!?]/g, '');
+                            if (wordStr === lastStr && chunk.timestamp[0] <= lastWord.end + 0.5) {
+                                lastWord.end = Math.max(lastWord.end, chunk.timestamp[1]);
+                                return;
+                            }
+                        }
+                        const w = { word: chunk.text, start: chunk.timestamp[0], end: chunk.timestamp[1] };
+                        words.push(w);
+                        text += w.word + ' ';
+                        lastWord = w;
+                    });
+                    text = text.trim();
+                } else {
+                    text = result.text || '';
+                }
+
+                if (this._onResult) {
+                    this._onResult({ isFinal: true, text, interim: '', chunks: words });
+                }
+            } catch (err) {
+                console.error('Whisper mic transcription failed:', err);
+                if (this._onError) this._onError(err.message);
+                if (this._onStatus) this._onStatus('error', err.message);
+            }
+        };
+
+        this._mediaRecorder.start(1000); // collect in 1-second chunks
     }
-    async stop() { }
+
+    async stop() {
+        if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+            this._mediaRecorder.stop();
+        }
+        if (this._micStream) {
+            this._micStream.getTracks().forEach(t => t.stop());
+            this._micStream = null;
+        }
+    }
 
     async setLanguage(languageCode) {
         this.language = languageCode;

@@ -1,4 +1,4 @@
-const CACHE = 'voice-notes-v4';
+const CACHE = 'voice-notes-v5';
 const SHELL = [
   './', './index.html', './app.js', './app-utils.js', './style.css',
   './manifest.json', './icon-192.png', './icon-512.png',
@@ -7,6 +7,8 @@ const SHELL = [
   './engines/base-engine.js',
   './engines/offline-summarizer-worker.js',
   './engines/whisper-worker.js',
+  './engines/transcription-queue.js',
+  './engines/tts-worker.js',
 ];
 
 self.addEventListener('install', e => {

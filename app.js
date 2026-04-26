@@ -1,8 +1,9 @@
 import {
   applyTheme, getStoredTheme, toggleTheme, showToast,
   WaveformVisualizer, RecordingTimer,
-  exportNote, saveNote, loadAllNotes, deleteNote, updateNote, clearAllNotes
+  exportNote, saveNote, loadAllNotes, deleteNote, clearAllNotes
 } from './app-utils.js';
+import transcriptionQueue, { MAX_WORKERS } from './engines/transcription-queue.js';
 
 // ── Boot ────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
@@ -144,6 +145,31 @@ async function initApp() {
     summarizerProgressArea: document.getElementById('summarizerProgressArea'),
     summarizerProgressFile: document.getElementById('summarizerProgressFile'),
     summarizerProgressBar: document.getElementById('summarizerProgressBar'),
+    // Inbox
+    recordingInbox: document.getElementById('recordingInbox'),
+    inboxList: document.getElementById('inboxList'),
+    inboxWorkerBadge: document.getElementById('inboxWorkerBadge'),
+    clearInboxBtn: document.getElementById('clearInboxBtn'),
+    bulkQueueCount: document.getElementById('bulkQueueCount'),
+    // TTS
+    ttsSpeakBtn: document.getElementById('ttsSpeakBtn'),
+    ttsSpeakIcon: document.getElementById('ttsSpeakIcon'),
+    ttsSpeakLabel: document.getElementById('ttsSpeakLabel'),
+    ttsStopBtn: document.getElementById('ttsStopBtn'),
+    ttsVoiceSelect: document.getElementById('ttsVoiceSelect'),
+    ttsSpeedSlider: document.getElementById('ttsSpeedSlider'),
+    ttsSpeedValue: document.getElementById('ttsSpeedValue'),
+    ttsProgress: document.getElementById('ttsProgress'),
+    ttsProgressFill: document.getElementById('ttsProgressFill'),
+    ttsProgressLabel: document.getElementById('ttsProgressLabel'),
+    // Kokoro model card
+    kokoroReadiness: document.getElementById('kokoroReadiness'),
+    kokoroProgressArea: document.getElementById('kokoroProgressArea'),
+    kokoroProgressFile: document.getElementById('kokoroProgressFile'),
+    kokoroProgressBar: document.getElementById('kokoroProgressBar'),
+    // Settings
+    concurrencySelect: document.getElementById('concurrencySelect'),
+    concurrencyLabel: document.getElementById('concurrencyLabel'),
   };
 
   const state = {
@@ -231,7 +257,7 @@ async function initApp() {
   ).join('');
 
   // Select best available engine — try in priority order, skip unavailable
-  const priorityOrder = ['webspeech', 'whisper'];
+  const priorityOrder = ['whisper', 'webspeech'];
   let engineReady = false;
   for (const eid of priorityOrder) {
     try {
@@ -310,18 +336,39 @@ async function initApp() {
   });
 
   // ── Recording ─────────────────────────────────────────────────────────
+  // For Whisper: record with MediaRecorder, enqueue blob on stop (non-blocking).
+  // For WebSpeech: real-time transcription as before.
+
+  let whisperRecorder = null;
+  let whisperChunks   = [];
+  let whisperMime     = '';
+
+  function resetRecordBtn() {
+    state.isRecording = false;
+    el.recordBtnIcon.textContent  = '🎙️';
+    el.recordBtnLabel.textContent = 'Start Recording';
+    el.recordBtn.classList.remove('recording');
+    el.recordBtn.disabled = false;
+    el.recordingDot.classList.remove('active');
+    el.recordingStatus.textContent = '';
+  }
 
   const startRecording = async () => {
-    state.isRecording = true;
-    state.transcriptText = '';
-    state.timedWords = [];
-    el.transcript.value = '';
+    const engineInfo = manager.getCurrentEngineInfo();
+    const isWhisper  = engineInfo && engineInfo.id === 'whisper';
+
+    state.isRecording     = true;
+    state.transcriptText  = '';
+    state.timedWords      = [];
+    el.transcript.value   = '';
     el.timedTranscript.innerHTML = '<div class="history-empty">Recording…</div>';
-    el.recordBtnIcon.textContent = '⏹️';
+    el.recordBtnIcon.textContent  = '⏹️';
     el.recordBtnLabel.textContent = 'Stop';
     el.recordBtn.classList.add('recording');
     el.recordingDot.classList.add('active');
-    el.recordingStatus.textContent = 'Recording…';
+    el.recordingStatus.textContent = isWhisper
+      ? 'Recording… (queued for transcription on stop)'
+      : 'Recording…';
     timer.start();
 
     try {
@@ -329,44 +376,60 @@ async function initApp() {
       waveform.start(micStream);
     } catch (_) {}
 
-    await manager.start(
-      result => {
-        if (result.isFinal) state.transcriptText += result.text + ' ';
-        el.transcript.value = state.transcriptText + (result.interim || '');
-        updateWordCount();
-        if (result.chunks) {
-          state.timedWords = [...state.timedWords, ...result.chunks];
-          renderTimedTranscript(state.timedWords);
-        }
-      },
-      err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
-      (status, data) => {
-        if (status === 'loading') {
-          updateProgress(true, (data?.progress !== undefined) ? data.progress : null, `Loading: ${data?.file || '…'}`);
-          updateModelStatus('whisper', 'loading');
-        } else if (status === 'progress') {
-          updateModelStatus('whisper', 'progress', data);
-        } else if (status === 'ready') {
-          updateProgress(false);
-          updateModelStatus('whisper', 'ready');
-        }
-      }
-    );
+    if (isWhisper) {
+      // ── Whisper path: MediaRecorder → blob → queue ──────────────────
+      const mimes = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+      whisperMime   = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      whisperChunks = [];
+      whisperRecorder = new MediaRecorder(micStream, whisperMime ? { mimeType: whisperMime } : {});
+      whisperRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) whisperChunks.push(e.data); };
+      whisperRecorder.onstop = () => {
+        if (!whisperChunks.length) return;
+        const blob = new Blob(whisperChunks, { type: whisperMime || 'audio/webm' });
+        whisperChunks = [];
+        const sessionName = el.sessionTitle.value.trim()
+          || `Recording ${new Date().toLocaleTimeString()}`;
+        transcriptionQueue.setLanguage(localStorage.getItem('vn-lang') || 'auto');
+        transcriptionQueue.enqueue(blob, sessionName);
+        showToast('Recording queued for transcription ⚡', 'info');
+      };
+      whisperRecorder.start(1000);
+    } else {
+      // ── WebSpeech path: real-time transcription ──────────────────────
+      await manager.start(
+        result => {
+          if (result.isFinal) state.transcriptText += result.text + ' ';
+          el.transcript.value = state.transcriptText + (result.interim || '');
+          updateWordCount();
+          if (result.chunks) {
+            state.timedWords = [...state.timedWords, ...result.chunks];
+            renderTimedTranscript(state.timedWords);
+          }
+        },
+        err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
+        () => {}
+      );
+    }
   };
 
   const stopRecording = async () => {
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    const engineInfo = manager.getCurrentEngineInfo();
+    const isWhisper  = engineInfo && engineInfo.id === 'whisper';
+
     waveform.stop();
     timer.stop();
-    await manager.stop();
-    state.isRecording = false;
-    el.recordBtnIcon.textContent = '🎙️';
-    el.recordBtnLabel.textContent = 'Start Recording';
-    el.recordBtn.classList.remove('recording');
-    el.recordingDot.classList.remove('active');
-    el.recordingStatus.textContent = '';
-    setStatus('Stopped');
-    updateWordCount();
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+
+    if (isWhisper) {
+      if (whisperRecorder && whisperRecorder.state !== 'inactive') whisperRecorder.stop();
+      whisperRecorder = null;
+      resetRecordBtn(); // re-enable immediately — transcription runs in background queue
+    } else {
+      await manager.stop();
+      resetRecordBtn();
+      setStatus('Stopped');
+      updateWordCount();
+    }
   };
 
   el.recordBtn.addEventListener('click', async () => {
@@ -374,17 +437,14 @@ async function initApp() {
     else {
       try { await startRecording(); }
       catch (err) {
-        state.isRecording = false;
-        el.recordBtn.classList.remove('recording');
-        el.recordBtnIcon.textContent = '🎙️';
-        el.recordBtnLabel.textContent = 'Start Recording';
-        el.recordingDot.classList.remove('active');
+        resetRecordBtn();
         timer.stop();
         waveform.stop();
         showToast(`Error: ${err.message}`, 'error');
       }
     }
   });
+
 
   // ── Timed Transcript ──────────────────────────────────────────────────
   const switchTab = tab => {
@@ -462,77 +522,50 @@ async function initApp() {
     });
   });
 
-  // ── File Upload ───────────────────────────────────────────────────────
-  const setFile = async file => {
-    if (!file) return;
-    state.selectedFile = file;
-    el.fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
-    el.transcribeFileBtn.disabled = false;
-    el.audioPlayback.src = URL.createObjectURL(file);
-    el.audioPlayback.style.display = 'block';
+  // ── File Upload (Bulk) ────────────────────────────────────────────────
+  let pendingFiles = [];
 
-    // Automatically switch to Whisper for file transcription
-    const info = manager.getCurrentEngineInfo();
-    if (info && info.id !== 'whisper') {
-      try {
-        await manager.setEngine('whisper');
-        updateEngineUI();
-        showToast('Switched to Whisper engine for file transcription.', 'info');
+  function updateBulkUI() {
+    if (pendingFiles.length === 0) {
+      el.transcribeFileBtn.disabled = true;
+      el.fileInfo.textContent = '';
+      el.bulkQueueCount.style.display = 'none';
+    } else {
+      el.transcribeFileBtn.disabled = false;
+      el.fileInfo.textContent = `${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''} selected`;
+      el.bulkQueueCount.textContent = pendingFiles.length + ' files';
+      el.bulkQueueCount.style.display = '';
+    }
+  }
 
-        manager.preloadEngine('whisper', (status, data) => {
-          updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
-          if (status === 'ready') updateModelStatus('whisper', 'ready');
-        }).catch(err => console.error('Switch-time preload failed:', err));
-
-      } catch (e) {
-        console.error('Failed to auto-switch to whisper:', e);
+  function addFiles(files) {
+    for (const f of files) {
+      if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|ogg|webm|flac|aac|opus)$/i)) {
+        pendingFiles.push(f);
       }
     }
-  };
+    updateBulkUI();
+  }
 
   el.uploadArea.addEventListener('click', () => el.audioFile.click());
   el.uploadArea.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') el.audioFile.click(); });
-  el.audioFile.addEventListener('change', e => setFile(e.target.files[0]));
+  el.audioFile.addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
   el.uploadArea.addEventListener('dragover', e => { e.preventDefault(); el.uploadArea.classList.add('dragover'); });
   el.uploadArea.addEventListener('dragleave', () => el.uploadArea.classList.remove('dragover'));
   el.uploadArea.addEventListener('drop', e => {
     e.preventDefault(); el.uploadArea.classList.remove('dragover');
-    setFile(e.dataTransfer.files[0]);
+    addFiles(Array.from(e.dataTransfer.files));
   });
 
-  el.transcribeFileBtn.addEventListener('click', async () => {
-    if (!state.selectedFile) return;
-    el.transcribeFileBtn.disabled = true;
-    updateProgress(true, 0, 'Preparing…');
-    try {
-      const result = await manager.transcribeFile(state.selectedFile, p => {
-        // p = { percent, status, data }
-        if (p.data?.status === 'progress') {
-          updateModelStatus('whisper', 'progress', p.data);
-        } else if (p.data?.status === 'ready') {
-          updateModelStatus('whisper', 'ready');
-        }
-        updateProgress(true, p.percent, p.status);
-      });
-      updateProgress(false);
-      el.transcript.value = result.text;
-      state.transcriptText = result.text;
-      if (result.chunks || result.words) {
-        state.timedWords = (result.chunks || result.words).map(c => ({
-          word: c.text || c.word,
-          start: c.timestamp ? c.timestamp[0] : c.start,
-          end: c.timestamp ? c.timestamp[1] : c.end
-        }));
-        renderTimedTranscript(state.timedWords);
-      }
-      updateWordCount();
-      showToast('Transcription complete!', 'success');
-    } catch (err) {
-      updateProgress(false);
-      showToast(`Transcription failed: ${err.message}`, 'error');
-    } finally {
-      el.transcribeFileBtn.disabled = false;
+  el.transcribeFileBtn.addEventListener('click', () => {
+    if (!pendingFiles.length) return;
+    transcriptionQueue.setLanguage(localStorage.getItem('vn-lang') || 'auto');
+    for (const f of pendingFiles) {
+      transcriptionQueue.enqueue(f, f.name);
     }
+    showToast(`${pendingFiles.length} file(s) queued for transcription ⚡`, 'info');
+    pendingFiles = [];
+    updateBulkUI();
   });
 
   // ── Copy & Export ─────────────────────────────────────────────────────
@@ -552,6 +585,16 @@ async function initApp() {
   el.exportBtn.addEventListener('click', () => {
     const open = el.exportMenu.classList.toggle('open');
     el.exportBtn.setAttribute('aria-expanded', open);
+    if (open) {
+      // Use position:fixed calculated from the button rect to escape backdrop-filter stacking context
+      const rect = el.exportBtn.getBoundingClientRect();
+      el.exportMenu.style.position = 'fixed';
+      el.exportMenu.style.top = (rect.bottom + 6) + 'px';
+      // Align right edge of menu to right edge of button
+      el.exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
+      el.exportMenu.style.left = 'auto';
+      el.exportMenu.style.minWidth = Math.max(160, rect.width) + 'px';
+    }
   });
   document.addEventListener('click', e => {
     if (!el.exportBtn.contains(e.target) && !el.exportMenu.contains(e.target)) {
@@ -559,6 +602,13 @@ async function initApp() {
       el.exportBtn.setAttribute('aria-expanded', 'false');
     }
   });
+  window.addEventListener('scroll', () => {
+    if (el.exportMenu.classList.contains('open')) {
+      const rect = el.exportBtn.getBoundingClientRect();
+      el.exportMenu.style.top = (rect.bottom + 6) + 'px';
+      el.exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
+    }
+  }, { passive: true });
 
   const makeCurrentNote = () => ({
     id: state.currentNote?.id,
@@ -763,4 +813,201 @@ async function initApp() {
   });
 
   renderHistory();
+
+  // ── Concurrency Setting ───────────────────────────────────────────────
+  if (el.concurrencySelect && el.concurrencyLabel) {
+    const stored = parseInt(localStorage.getItem('vn-max-workers') || MAX_WORKERS, 10);
+    el.concurrencySelect.value = String(Math.min(3, Math.max(1, stored)));
+    el.concurrencyLabel.textContent = el.concurrencySelect.value;
+    el.concurrencySelect.addEventListener('change', () => {
+      localStorage.setItem('vn-max-workers', el.concurrencySelect.value);
+      el.concurrencyLabel.textContent = el.concurrencySelect.value;
+      showToast('Concurrency updated — takes effect on next queue run', 'info');
+    });
+  }
+
+  // ── Recording Inbox (Queue UI) ────────────────────────────────────────
+  function renderInbox(items) {
+    const hasItems = items.length > 0;
+    el.recordingInbox.style.display = hasItems ? 'block' : 'none';
+    const active = items.filter(i => ['queued','decoding','loading','transcribing'].includes(i.status)).length;
+    el.inboxWorkerBadge.textContent = `${Math.min(active, MAX_WORKERS)}/${MAX_WORKERS} workers`;
+
+    if (!hasItems) { el.inboxList.innerHTML = ''; return; }
+
+    el.inboxList.innerHTML = items.slice().reverse().map(item => {
+      const ago = item.doneAt
+        ? `Done ${Math.round((Date.now() - item.doneAt) / 1000)}s ago`
+        : item.status === 'queued' ? 'Waiting…'
+        : item.progressLabel || item.status;
+      const pct = item.progress || 0;
+      const isActive = ['decoding','loading','transcribing'].includes(item.status);
+      return `<div class="inbox-item" data-id="${item.id}">
+        <div>
+          <div class="inbox-item-name">${item.name}</div>
+          <div class="inbox-item-meta">${ago}</div>
+        </div>
+        <div class="inbox-item-actions">
+          <span class="inbox-status-badge" data-status="${item.status}">${item.status}</span>
+          ${item.status === 'done' ? `<button class="btn-ghost load-inbox-btn" data-id="${item.id}">Load</button>` : ''}
+          ${item.status !== 'decoding' && item.status !== 'transcribing' && item.status !== 'loading'
+            ? `<button class="btn-danger remove-inbox-btn" data-id="${item.id}">🗑️</button>` : ''}
+        </div>
+        ${isActive ? `<div class="inbox-progress-wrap">
+          <div class="inbox-progress-label">${item.progressLabel || '…'}</div>
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </div>` : ''}
+      </div>`;
+    }).join('');
+
+    el.inboxList.querySelectorAll('.load-inbox-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const id = Number(e.target.dataset.id);
+        const item = transcriptionQueue.getItem(id);
+        if (!item || !item.transcript) return;
+        el.transcript.value = item.transcript;
+        state.transcriptText = item.transcript;
+        if (item.chunks?.length) { state.timedWords = item.chunks; renderTimedTranscript(item.chunks); }
+        el.sessionTitle.value = item.name || '';
+        updateWordCount();
+        showToast(`Loaded: ${item.name}`, 'info');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    });
+    el.inboxList.querySelectorAll('.remove-inbox-btn').forEach(btn => {
+      btn.addEventListener('click', e => transcriptionQueue.remove(Number(e.target.dataset.id)));
+    });
+  }
+
+  transcriptionQueue.addEventListener('change', e => renderInbox(e.detail));
+  transcriptionQueue.addEventListener('itemdone', e => {
+    const item = e.detail;
+    if (!item.transcript) return;
+    saveNote({
+      date: new Date(item.doneAt).toISOString(),
+      title: item.name || 'Recording',
+      transcript: item.transcript,
+      summary: '',
+      engine: 'whisper',
+    }).then(() => { renderHistory(); showToast(`✅ Saved: "${item.name}"`, 'success'); });
+  });
+
+  if (el.clearInboxBtn) {
+    el.clearInboxBtn.addEventListener('click', () => transcriptionQueue.clearDone());
+  }
+
+  // ── TTS (Kokoro-82M) ──────────────────────────────────────────────────
+  let ttsWorker = null;
+  let ttsAudioCtx = null;
+  let ttsSource = null;
+  let ttsSpeaking = false;
+
+  function updateKokoroStatus(status, data) {
+    if (!el.kokoroReadiness) return;
+    if (status === 'loading') {
+      el.kokoroReadiness.textContent = 'Initializing…'; el.kokoroReadiness.dataset.state = 'downloading';
+    } else if (status === 'progress') {
+      el.kokoroProgressArea.style.display = 'block';
+      el.kokoroReadiness.textContent = 'Downloading…'; el.kokoroReadiness.dataset.state = 'downloading';
+      if (data?.file) el.kokoroProgressFile.textContent = `File: ${data.file}`;
+      if (data?.progress != null) el.kokoroProgressBar.style.width = `${data.progress}%`;
+    } else if (status === 'ready') {
+      el.kokoroReadiness.textContent = 'Ready'; el.kokoroReadiness.dataset.state = 'ready';
+      el.kokoroProgressArea.style.display = 'none';
+    } else if (status === 'error') {
+      el.kokoroReadiness.textContent = 'Error'; el.kokoroReadiness.dataset.state = 'error';
+    }
+  }
+
+  function setTTSProgress(show, label = '', pct = null) {
+    el.ttsProgress.style.display = show ? 'flex' : 'none';
+    if (label) el.ttsProgressLabel.textContent = label;
+    if (pct != null) { el.ttsProgressFill.style.width = pct + '%'; el.ttsProgressFill.style.animation = 'none'; }
+    else if (show) { el.ttsProgressFill.style.width = '100%'; el.ttsProgressFill.style.animation = 'pulse 1.5s infinite'; }
+  }
+
+  function initTTSWorker() {
+    if (ttsWorker) return;
+    ttsWorker = new Worker('engines/tts-worker.js', { type: 'module' });
+    ttsWorker.postMessage({ action: 'list_voices', id: 'voices' });
+    ttsWorker.onmessage = e => {
+      const { status, id } = e.data;
+      if (status === 'voices') {
+        el.ttsVoiceSelect.innerHTML = e.data.voices.map(v =>
+          `<option value="${v.id}">${v.name}</option>`
+        ).join('');
+        return;
+      }
+      if (status === 'loading') { setTTSProgress(true, 'Loading Kokoro model…'); updateKokoroStatus('loading'); }
+      else if (status === 'progress') {
+        const d = e.data.data || {};
+        setTTSProgress(true, `Downloading: ${d.file || 'kokoro'} (${Math.round(d.progress || 0)}%)`, d.progress);
+        updateKokoroStatus('progress', d);
+      } else if (status === 'ready') { setTTSProgress(false); updateKokoroStatus('ready'); }
+      else if (status === 'generating') { setTTSProgress(true, 'Generating speech…'); }
+      else if (status === 'chunk') {
+        setTTSProgress(true, `Generating… ${e.data.current}/${e.data.total}`, Math.round((e.data.current / e.data.total) * 100));
+      } else if (status === 'success') {
+        setTTSProgress(false);
+        const { audio, sampleRate } = e.data;
+        ttsAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+        const buf = ttsAudioCtx.createBuffer(1, audio.length, sampleRate);
+        buf.copyToChannel(audio, 0);
+        ttsSource = ttsAudioCtx.createBufferSource();
+        ttsSource.buffer = buf;
+        ttsSource.connect(ttsAudioCtx.destination);
+        ttsSource.onended = () => { ttsSpeaking = false; el.ttsSpeakBtn.classList.remove('speaking'); el.ttsStopBtn.style.display = 'none'; el.ttsSpeakBtn.disabled = false; };
+        ttsSource.start();
+        ttsSpeaking = true;
+        el.ttsSpeakBtn.classList.add('speaking');
+        el.ttsStopBtn.style.display = '';
+      } else if (status === 'error') {
+        setTTSProgress(false);
+        showToast(`TTS error: ${e.data.error}`, 'error');
+        el.ttsSpeakBtn.disabled = false;
+        el.ttsSpeakIcon.textContent = '🔊';
+        el.ttsSpeakLabel.textContent = 'Speak';
+        updateKokoroStatus('error');
+      }
+    };
+  }
+
+  el.ttsSpeakBtn.addEventListener('click', () => {
+    const text = window.getSelection()?.toString().trim() || el.transcript.value.trim();
+    if (!text) { showToast('No text to speak — add a transcript first.', 'warning'); return; }
+    initTTSWorker();
+    const voice = el.ttsVoiceSelect.value || 'af_heart';
+    const speed = parseFloat(el.ttsSpeedSlider.value) || 1.0;
+    el.ttsSpeakBtn.disabled = true;
+    el.ttsSpeakIcon.textContent = '⏳';
+    el.ttsSpeakLabel.textContent = 'Speaking…';
+    ttsWorker.postMessage({ action: 'generate', text, voice, speed, id: 'tts-' + Date.now() });
+  });
+
+  el.ttsStopBtn.addEventListener('click', () => {
+    if (ttsSource) { try { ttsSource.stop(); } catch (_) {} ttsSource = null; }
+    ttsSpeaking = false;
+    el.ttsSpeakBtn.classList.remove('speaking');
+    el.ttsStopBtn.style.display = 'none';
+    el.ttsSpeakBtn.disabled = false;
+    el.ttsSpeakIcon.textContent = '🔊';
+    el.ttsSpeakLabel.textContent = 'Speak';
+    setTTSProgress(false);
+  });
+
+  el.ttsSpeedSlider.addEventListener('input', () => {
+    el.ttsSpeedValue.textContent = parseFloat(el.ttsSpeedSlider.value).toFixed(1) + '×';
+  });
+
+  // Ctrl+Shift+S → speak
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); el.ttsSpeakBtn.click(); }
+  });
+
+  // "Preload All" also warms up the Kokoro TTS model
+  el.preloadModelsBtn.addEventListener('click', () => {
+    initTTSWorker();
+    ttsWorker.postMessage({ action: 'preload', id: 'kokoro-preload-' + Date.now() });
+  });
 }
+

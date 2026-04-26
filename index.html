@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="style.css" />
-  <title>Voice Notes — Private & Offline</title>
+  <title>Voice Notes — Private &amp; Offline</title>
 </head>
 <body>
 
@@ -54,23 +54,36 @@
         </div>
       </div>
 
-
-      <p class="kbd-hint" aria-hidden="true">Press <kbd>Space</kbd> to start / stop recording &nbsp;|&nbsp; <kbd>Ctrl+Shift+C</kbd> to copy transcript</p>
+      <p class="kbd-hint" aria-hidden="true">Press <kbd>Space</kbd> to start / stop &nbsp;|&nbsp; <kbd>Ctrl+Shift+C</kbd> to copy transcript</p>
     </div>
 
-    <!-- File Upload Card -->
+    <!-- ── Recording Inbox ── -->
+    <div class="card" id="recordingInbox" style="display:none;" role="region" aria-label="Transcription queue">
+      <div class="section-header">
+        <span class="section-label">⚡ Transcription Queue</span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span id="inboxWorkerBadge" class="worker-badge" title="Active Whisper workers"></span>
+          <button id="clearInboxBtn" class="btn-ghost" style="font-size:0.78rem; padding:6px 12px;" aria-label="Clear finished items">🧹 Clear done</button>
+        </div>
+      </div>
+      <div id="inboxList" class="inbox-list" role="list" aria-label="Queue items"></div>
+    </div>
+
+    <!-- Bulk File Upload Card -->
     <div class="card" id="uploadSection" style="display:none;" role="region" aria-label="File upload">
       <div class="section-header">
-        <span class="section-label">📁 Transcribe Audio File</span>
+        <span class="section-label">📁 Transcribe Audio Files</span>
+        <span id="bulkQueueCount" class="word-count-badge" style="display:none;">0 files</span>
       </div>
       <label for="audioFile" style="display:block; cursor:pointer;">
-        <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Drop audio file here or click to browse">
-          Drop audio here or <strong>click to browse</strong>
+        <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Drop audio files here or click to browse">
+          Drop audio files here or <strong>click to browse</strong><br>
+          <span style="font-size:0.78rem; opacity:0.7;">Supports multiple files — all transcribed in parallel</span>
         </div>
       </label>
-      <input type="file" id="audioFile" accept="audio/*" style="display:none;" aria-label="Choose audio file" />
+      <input type="file" id="audioFile" accept="audio/*" multiple style="display:none;" aria-label="Choose audio files" />
       <div class="action-row" style="margin-top: 12px; align-items: center;">
-        <button id="transcribeFileBtn" class="btn-primary" disabled aria-label="Transcribe selected file">🎵 Transcribe</button>
+        <button id="transcribeFileBtn" class="btn-primary" disabled aria-label="Transcribe selected files">🎵 Transcribe All</button>
         <span id="fileInfo" class="file-info"></span>
       </div>
       <div id="progressContainer" style="display:none;">
@@ -86,13 +99,13 @@
         <button id="preloadModelsBtn" class="btn-ghost" style="font-size:0.78rem; padding:6px 12px;" aria-label="Preload all AI models">⬇️ Preload All</button>
       </div>
       <div class="model-status-grid" id="modelStatusGrid">
-        <!-- Whisper Model -->
+        <!-- Whisper -->
         <div class="model-card" id="whisperModelCard">
           <div class="model-card-header">
             <div class="model-card-icon">🎙️</div>
             <div class="model-card-info">
               <div class="model-card-name">Whisper Tiny (English)</div>
-              <div class="model-card-desc">Speech-to-text transcription · <code>Xenova/whisper-tiny</code></div>
+              <div class="model-card-desc">Speech-to-text · <code>Xenova/whisper-tiny</code> · ~40 MB</div>
             </div>
             <div class="model-readiness-badge" id="whisperReadiness" data-state="idle">Not loaded</div>
           </div>
@@ -101,7 +114,22 @@
             <div class="progress-track"><div id="whisperProgressBar" class="progress-fill"></div></div>
           </div>
         </div>
-        <!-- Summarizer Model -->
+        <!-- Kokoro TTS -->
+        <div class="model-card" id="kokoroModelCard">
+          <div class="model-card-header">
+            <div class="model-card-icon">🔊</div>
+            <div class="model-card-info">
+              <div class="model-card-name">Kokoro-82M TTS</div>
+              <div class="model-card-desc">Text-to-speech · <code>onnx-community/Kokoro-82M-v1.0-ONNX</code> · ~82 MB</div>
+            </div>
+            <div class="model-readiness-badge" id="kokoroReadiness" data-state="idle">Not loaded</div>
+          </div>
+          <div class="model-progress-area" id="kokoroProgressArea" style="display:none;">
+            <div class="model-progress-file" id="kokoroProgressFile">Downloading…</div>
+            <div class="progress-track"><div id="kokoroProgressBar" class="progress-fill"></div></div>
+          </div>
+        </div>
+        <!-- Summarizer -->
         <div class="model-card" id="summarizerModelCard">
           <div class="model-card-header">
             <div class="model-card-icon">📝</div>
@@ -143,13 +171,39 @@
         <div class="history-empty">No interactive transcript available.</div>
       </div>
 
+      <!-- TTS Panel -->
+      <div class="tts-panel" id="ttsPanel">
+        <div class="tts-controls">
+          <button id="ttsSpeakBtn" class="btn-ghost tts-speak-btn" aria-label="Speak transcript aloud" title="Read transcript aloud with Kokoro AI">
+            <span id="ttsSpeakIcon">🔊</span>
+            <span id="ttsSpeakLabel">Speak</span>
+          </button>
+          <button id="ttsStopBtn" class="btn-ghost" style="display:none;" aria-label="Stop speaking">⏹ Stop</button>
+          <select id="ttsVoiceSelect" class="tts-voice-select" aria-label="TTS voice">
+            <option value="af_heart">❤️ Heart (US Female)</option>
+          </select>
+          <div class="tts-speed-wrap" title="Speech speed">
+            <span class="tts-speed-label">🐢</span>
+            <input type="range" id="ttsSpeedSlider" min="0.5" max="2" step="0.1" value="1" aria-label="Speech speed" />
+            <span class="tts-speed-label">🐇</span>
+            <span id="ttsSpeedValue" class="tts-speed-value">1.0×</span>
+          </div>
+        </div>
+        <div id="ttsProgress" class="tts-progress" style="display:none;">
+          <div class="tts-progress-bar-wrap">
+            <div id="ttsProgressFill" class="progress-fill tts-progress-fill"></div>
+          </div>
+          <span id="ttsProgressLabel" class="tts-progress-label">Loading Kokoro…</span>
+        </div>
+      </div>
+
       <div class="action-row">
         <button id="copyTranscriptBtn" class="btn-ghost" aria-label="Copy transcript to clipboard">📋 Copy</button>
         <div class="export-wrapper">
           <button id="exportBtn" class="btn-ghost" aria-label="Export transcript" aria-haspopup="true" aria-expanded="false">⬇️ Export ▾</button>
           <div id="exportMenu" class="export-menu" role="menu" aria-label="Export options">
-            <button id="exportTxt" role="menuitem">📄 Plain Text (.txt)</button>
-            <button id="exportMd"  role="menuitem">📘 Markdown (.md)</button>
+            <button id="exportTxt"  role="menuitem">📄 Plain Text (.txt)</button>
+            <button id="exportMd"   role="menuitem">📘 Markdown (.md)</button>
             <button id="exportJson" role="menuitem">📊 JSON (.json)</button>
           </div>
         </div>
@@ -218,6 +272,16 @@
       </div>
 
       <div class="settings-group">
+        <label for="concurrencySelect">⚡ Max parallel workers: <span id="concurrencyLabel"></span></label>
+        <select id="concurrencySelect" aria-label="Maximum parallel Whisper workers">
+          <option value="1">1 (safe — any device)</option>
+          <option value="2">2 (recommended)</option>
+          <option value="3">3 (fast — powerful devices only)</option>
+        </select>
+        <p style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">Controls how many audio files are transcribed simultaneously. Higher = faster but uses more RAM.</p>
+      </div>
+
+      <div class="settings-group">
         <label for="themeSelect">Theme</label>
         <select id="themeSelect" aria-label="Choose app theme">
           <option value="light">☀️ Light</option>
@@ -249,6 +313,7 @@
         <tr><td style="padding:8px 0; color:var(--text-muted);">Toggle theme</td><td style="text-align:right;"><kbd>Ctrl+Shift+T</kbd></td></tr>
         <tr><td style="padding:8px 0; color:var(--text-muted);">Open settings</td><td style="text-align:right;"><kbd>Ctrl+,</kbd></td></tr>
         <tr><td style="padding:8px 0; color:var(--text-muted);">Close modal</td><td style="text-align:right;"><kbd>Escape</kbd></td></tr>
+        <tr><td style="padding:8px 0; color:var(--text-muted);">Speak transcript</td><td style="text-align:right;"><kbd>Ctrl+Shift+S</kbd></td></tr>
       </tbody>
     </table>
   </div>
@@ -268,6 +333,6 @@
   </nav>
 </footer>
 
-<script type="module" src="app.js?v=10"></script>
+<script type="module" src="app.js?v=11"></script>
 </body>
 </html>

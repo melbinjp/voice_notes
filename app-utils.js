@@ -160,7 +160,7 @@ export function exportNote(note, format) {
 }
 
 // ── IndexedDB ───────────────────────────────────────────────────────────
-const DB_NAME = 'voiceNotesDB', DB_VER = 2, STORE = 'history';
+const DB_NAME = 'voiceNotesDB', DB_VER = 3, STORE = 'history';
 
 export function openDB() {
   return new Promise((resolve, reject) => {
@@ -228,6 +228,23 @@ export async function updateNote(id, updates) {
     r.onerror = () => rej(r.error);
   });
   db.close();
+}
+
+// Batch-save multiple notes in one transaction (efficient for bulk import)
+export async function saveBatchNotes(notes) {
+  if (!notes || !notes.length) return [];
+  const db = await openDB();
+  const tx = db.transaction(STORE, 'readwrite');
+  const store = tx.objectStore(STORE);
+  const ids = await Promise.all(notes.map(note =>
+    new Promise((res, rej) => {
+      const r = store.add(note);
+      r.onsuccess = () => res(r.result);
+      r.onerror   = () => rej(r.error);
+    })
+  ));
+  db.close();
+  return ids;
 }
 
 export async function clearAllNotes() {
