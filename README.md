@@ -46,7 +46,7 @@ Once live, visit the URL on your phone or desktop and select **"Add to Home Scre
 ## 🧠 How the AI Works
 
 The app utilizes **Transformers.js** to run heavy machine learning models inside Web Workers:
-- **Transcription**: Uses `Xenova/whisper-tiny.en` (~40MB).
+- **Transcription**: Uses `Xenova/whisper-tiny` (~40MB).
 - **Summarization**: Uses `Xenova/distilbart-cnn-6-6` (~300MB).
 
 **First Load**: The first time you use a specific engine or summarize, the models will download from Hugging Face. 

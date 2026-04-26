@@ -14,13 +14,13 @@ class PipelineSingleton {
     static instance = null;
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
-            console.log(`[Whisper Worker] Loading pipeline for Xenova/whisper-tiny.en...`);
-            this.instance = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+            console.log(`[Whisper Worker] Loading pipeline for Xenova/whisper-tiny...`);
+            this.instance = pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
                 progress_callback,
                 device: (navigator.gpu ? 'webgpu' : 'wasm') // Use webgpu if supported, otherwise wasm
             }).catch(err => {
                 console.warn("WebGPU not supported, falling back to WebGL/WASM", err);
-                return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+                return pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
                     progress_callback
                 });
             });
@@ -46,7 +46,7 @@ function convertPCMToFloat32(buffer) {
 }
 
 self.onmessage = async (e) => {
-    const { action, audioData, sampleRate, id } = e.data;
+    const { action, audioData, sampleRate, id, language } = e.data;
 
     if (action === 'transcribe') {
         try {
@@ -104,11 +104,15 @@ self.onmessage = async (e) => {
             }
 
             // Run whisper prediction
-            const result = await transcriber(audioArray, {
+            const options = {
                 chunk_length_s: 30, // Processes in 30s chunks
                 stride_length_s: 5, // 5s overlap
                 return_timestamps: 'word' // Request word-level timestamps
-            });
+            };
+            if (language && language !== 'auto') {
+                options.language = language;
+            }
+            const result = await transcriber(audioArray, options);
 
             // Return success
             self.postMessage({

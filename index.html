@@ -54,11 +54,6 @@
         </div>
       </div>
 
-      <!-- Language row -->
-      <div class="lang-row" style="margin-top: 16px;">
-        <label for="languageSelector">🌐 Language:</label>
-        <select id="languageSelector" aria-label="Speech recognition language" style="width:auto; flex:1; max-width:260px;"></select>
-      </div>
 
       <p class="kbd-hint" aria-hidden="true">Press <kbd>Space</kbd> to start / stop recording &nbsp;|&nbsp; <kbd>Ctrl+Shift+C</kbd> to copy transcript</p>
     </div>
@@ -97,7 +92,7 @@
             <div class="model-card-icon">🎙️</div>
             <div class="model-card-info">
               <div class="model-card-name">Whisper Tiny (English)</div>
-              <div class="model-card-desc">Speech-to-text transcription · <code>Xenova/whisper-tiny.en</code></div>
+              <div class="model-card-desc">Speech-to-text transcription · <code>Xenova/whisper-tiny</code></div>
             </div>
             <div class="model-readiness-badge" id="whisperReadiness" data-state="idle">Not loaded</div>
           </div>
@@ -215,6 +210,11 @@
           <div id="engineFeatures" class="engine-features"></div>
         </div>
         <div id="modelDownloadStatus" class="model-status" style="display:none;"></div>
+      </div>
+
+      <div class="settings-group">
+        <label for="languageSelector">🌐 Language:</label>
+        <select id="languageSelector" aria-label="Speech recognition language"></select>
       </div>
 
       <div class="settings-group">
