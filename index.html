@@ -78,7 +78,6 @@
         <button id="transcribeFileBtn" class="btn-primary" disabled aria-label="Transcribe selected file">🎵 Transcribe</button>
         <span id="fileInfo" class="file-info"></span>
       </div>
-      <audio id="audioPlayback" controls style="display:none; margin-top: 12px;" aria-label="Audio playback"></audio>
       <div id="progressContainer" style="display:none;">
         <div class="progress-label" id="progressLabel">Processing...</div>
         <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
@@ -125,6 +124,8 @@
       </div>
       <p class="model-cache-hint" id="modelCacheHint">Models are cached in your browser after first download. No data leaves your device.</p>
     </div>
+
+    <audio id="audioPlayback" class="sticky-audio" controls style="display:none; margin-bottom: 12px; width: 100%; border-radius: var(--radius); background: var(--bg-card); box-shadow: var(--shadow-sm);" aria-label="Audio playback"></audio>
 
     <!-- Transcript Card -->
     <div class="card" role="region" aria-label="Transcript">

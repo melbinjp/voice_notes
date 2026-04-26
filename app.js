@@ -161,6 +161,11 @@ async function initApp() {
   const updateProgress = (show, pct = null, label = null) => {
     if (pct === undefined) pct = null;
     el.progressContainer.style.display = show ? 'block' : 'none';
+
+    if (pct === null && show && label && label.toLowerCase().includes('transcribing')) {
+        label = "Processing... This might take a few minutes depending on file size.";
+    }
+
     if (label) el.progressLabel.textContent = label;
     if (pct !== null) {
       el.progressBar.style.animation = 'none';
@@ -401,28 +406,85 @@ async function initApp() {
       span.textContent = w.word + ' ';
       span.dataset.start = w.start;
       span.dataset.end = w.end;
-      span.addEventListener('click', () => { el.audioPlayback.currentTime = w.start; el.audioPlayback.play(); });
+      span.contentEditable = 'true';
+
+      span.addEventListener('mousedown', (e) => {
+        // Only play if not actively editing
+        if (document.activeElement !== span) {
+            el.audioPlayback.currentTime = w.start;
+            el.audioPlayback.play();
+        }
+      });
+
+      span.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+              e.preventDefault();
+              span.blur();
+          }
+      });
+
+      span.addEventListener('input', (e) => {
+        w.word = span.textContent.trim();
+        // Update main transcript text as well
+        el.transcript.value = words.map(word => word.word).join(' ');
+        state.transcriptText = el.transcript.value;
+      });
+
       el.timedTranscript.appendChild(span);
     });
   }
+
+  let manualScrollTimeout = null;
+  let isScrollingManually = false;
+
+  const handleManualScroll = () => {
+    isScrollingManually = true;
+    if (manualScrollTimeout) clearTimeout(manualScrollTimeout);
+    manualScrollTimeout = setTimeout(() => {
+        isScrollingManually = false;
+    }, 3000); // Resume auto-scroll after 3 seconds of no scrolling
+  };
+
+  el.timedTranscript.addEventListener('wheel', handleManualScroll, { passive: true });
+  el.timedTranscript.addEventListener('touchmove', handleManualScroll, { passive: true });
 
   el.audioPlayback.addEventListener('timeupdate', () => {
     const t = el.audioPlayback.currentTime;
     el.timedTranscript.querySelectorAll('.transcript-word').forEach(span => {
       const active = t >= parseFloat(span.dataset.start) && t <= parseFloat(span.dataset.end);
       span.classList.toggle('active-word', active);
-      if (active) span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (active && !isScrollingManually) {
+          span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     });
   });
 
   // ── File Upload ───────────────────────────────────────────────────────
-  const setFile = file => {
+  const setFile = async file => {
     if (!file) return;
     state.selectedFile = file;
     el.fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
     el.transcribeFileBtn.disabled = false;
     el.audioPlayback.src = URL.createObjectURL(file);
     el.audioPlayback.style.display = 'block';
+
+    // Automatically switch to Whisper for file transcription
+    const info = manager.getCurrentEngineInfo();
+    if (info && info.id !== 'whisper') {
+      try {
+        await manager.setEngine('whisper');
+        updateEngineUI();
+        showToast('Switched to Whisper engine for file transcription.', 'info');
+
+        manager.preloadEngine('whisper', (status, data) => {
+          updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
+          if (status === 'ready') updateModelStatus('whisper', 'ready');
+        }).catch(err => console.error('Switch-time preload failed:', err));
+
+      } catch (e) {
+        console.error('Failed to auto-switch to whisper:', e);
+      }
+    }
   };
 
   el.uploadArea.addEventListener('click', () => el.audioFile.click());

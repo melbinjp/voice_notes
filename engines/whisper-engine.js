@@ -130,18 +130,49 @@ class WhisperEngine {
 
                         // Map timestamps to word array for app.js
                         let words = [];
+                        let consolidatedText = "";
                         if (e.data.chunks) {
+                            let lastWord = null;
                             e.data.chunks.forEach(chunk => {
-                                words.push({
+                                let currentWordStr = chunk.text.trim().toLowerCase();
+                                // Remove punctuation for matching
+                                currentWordStr = currentWordStr.replace(/[.,!?]/g, "");
+
+                                // Deduplicate overlapping or identical consecutive chunks
+                                if (lastWord) {
+                                    let lastWordStr = lastWord.word.trim().toLowerCase();
+                                    lastWordStr = lastWordStr.replace(/[.,!?]/g, "");
+
+                                    // If same word and timestamps overlap or are extremely close
+                                    if (currentWordStr === lastWordStr) {
+                                        let overlap = false;
+                                        if (chunk.timestamp[0] <= lastWord.end + 0.5) {
+                                            overlap = true;
+                                        }
+                                        if (overlap) {
+                                            // Extend the end time of the previous word
+                                            lastWord.end = Math.max(lastWord.end, chunk.timestamp[1]);
+                                            return; // Skip adding duplicate
+                                        }
+                                    }
+                                }
+
+                                let newWord = {
                                     word: chunk.text,
                                     start: chunk.timestamp[0],
                                     end: chunk.timestamp[1]
-                                });
+                                };
+                                words.push(newWord);
+                                consolidatedText += newWord.word + " ";
+                                lastWord = newWord;
                             });
+                            consolidatedText = consolidatedText.trim();
+                        } else {
+                            consolidatedText = e.data.text;
                         }
 
                         resolve({
-                            text: e.data.text,
+                            text: consolidatedText,
                             words: words,
                             duration,
                             engine: 'whisper',
