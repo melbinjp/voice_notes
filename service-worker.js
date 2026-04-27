@@ -8,7 +8,8 @@ const SHELL = [
   './engines/offline-summarizer-worker.js',
   './engines/whisper-worker.js',
   './engines/transcription-queue.js',
-  './engines/tts-worker.js',
+  './engines/mms-tts-worker.js',
+  './engines/kokoro-tts-worker.js',
 ];
 
 self.addEventListener('install', e => {

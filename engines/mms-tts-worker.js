@@ -9,21 +9,13 @@ env.useBrowserCache   = true;
 env.backends.onnx.wasm.numThreads = Math.max(1, (navigator.hardwareConcurrency || 2) - 1);
 
 // ── Available voices ──────────────────────────────────────────────────────
+// MMS only has one voice natively. We provide this array for API compatibility with the UI.
 const VOICES = [
-    { id: 'af_heart',   name: '❤️  Heart (US Female)',    lang: 'en-US' },
-    { id: 'af_bella',   name: '🌸 Bella (US Female)',    lang: 'en-US' },
-    { id: 'af_sarah',   name: '☀️  Sarah (US Female)',   lang: 'en-US' },
-    { id: 'af_nicole',  name: '🎙️ Nicole (US Female)',   lang: 'en-US' },
-    { id: 'am_adam',    name: '🎤 Adam (US Male)',        lang: 'en-US' },
-    { id: 'am_michael', name: '🎧 Michael (US Male)',    lang: 'en-US' },
-    { id: 'bf_emma',    name: '🫖 Emma (UK Female)',     lang: 'en-GB' },
-    { id: 'bf_isabella',name: '🌹 Isabella (UK Female)', lang: 'en-GB' },
-    { id: 'bm_george',  name: '🎩 George (UK Male)',     lang: 'en-GB' },
-    { id: 'bm_lewis',   name: '📻 Lewis (UK Male)',      lang: 'en-GB' },
+    { id: 'default',   name: '🎤 Default Voice',    lang: 'en-US' },
 ];
 
 // ── Pipeline singleton ────────────────────────────────────────────────────
-class KokoroPipeline {
+class MMSPipeline {
     static instance = null;
 
     static async getInstance(onProgress) {
@@ -45,7 +37,7 @@ class KokoroPipeline {
     }
 }
 
-// ── Split long text into sentence chunks (Kokoro cap ~500 chars) ───────────
+// ── Split long text into sentence chunks ───────────
 function splitSentences(text, maxLen = 400) {
     const raw = text.match(/[^.!?]+[.!?]*/g) || [text];
     const chunks = [];
@@ -75,12 +67,12 @@ self.onmessage = async (e) => {
         try {
             self.postMessage({ status: 'loading', id });
 
-            const tts = await KokoroPipeline.getInstance((data) => {
+            const tts = await MMSPipeline.getInstance((data) => {
                 if (data.status === 'progress') {
                     self.postMessage({
                         status: 'progress',
                         data: {
-                            file: data.file || data.name || 'kokoro-model',
+                            file: data.file || data.name || 'mms-model',
                             progress: typeof data.progress === 'number' ? Math.round(data.progress) : null,
                             loaded: data.loaded || 0,
                             total:  data.total  || 0,
@@ -95,10 +87,10 @@ self.onmessage = async (e) => {
             self.postMessage({ status: 'ready', id });
 
             if (action === 'generate') {
-                const { text, voice = 'af_heart', speed = 1.0 } = e.data;
+                const { text } = e.data; // MMS doesn't support voices/speed natively
                 const sentences = splitSentences(text.trim());
                 const allAudio  = [];
-                let   sampleRate = 24000;
+                let   sampleRate = 16000;
 
                 self.postMessage({ status: 'generating', total: sentences.length, id });
 
@@ -123,7 +115,7 @@ self.onmessage = async (e) => {
                 );
             }
         } catch (err) {
-            KokoroPipeline.instance = null; // reset on error so next attempt retries
+            MMSPipeline.instance = null; // reset on error so next attempt retries
             self.postMessage({ status: 'error', error: err.message, id });
         }
     }

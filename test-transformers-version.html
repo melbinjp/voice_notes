@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3';
+
+async function test() {
+    try {
+        console.log("Loading Kokoro pipeline with unsloth ONNX...");
+        const synthesizer = await pipeline('text-to-speech', 'Xenova/speecht5_tts', {
+            dtype: 'fp32', // or 'q8'
+        });
+        console.log("Loaded Kokoro pipeline!");
+        const out = await synthesizer('Hello world');
+        console.log("Output:", out);
+        document.body.innerHTML += "SUCCESS: " + Object.keys(out).join(",");
+    } catch(e) {
+        console.error(e);
+        document.body.innerHTML += "ERROR: " + e;
+    }
+}
+test();
+</script>
+</body>
+</html>

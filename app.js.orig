@@ -163,9 +163,6 @@ async function initApp() {
     ttsProgress: document.getElementById('ttsProgress'),
     ttsProgressFill: document.getElementById('ttsProgressFill'),
     ttsProgressLabel: document.getElementById('ttsProgressLabel'),
-    // TTS Engine Settings
-    ttsEngineSelect: document.getElementById('ttsEngineSelect'),
-    ttsSpeedWrap: document.getElementById('ttsSpeedWrap'),
     // Kokoro model card
     kokoroReadiness: document.getElementById('kokoroReadiness'),
     kokoroProgressArea: document.getElementById('kokoroProgressArea'),
@@ -296,7 +293,7 @@ async function initApp() {
       setStatus(`Switching to ${e.target.value}...`);
       await manager.setEngine(e.target.value);
       updateEngineUI();
-      
+
       // If switching to Whisper, proactively start preloading to show progress
       if (e.target.value === 'whisper') {
         manager.preloadEngine('whisper', (status, data) => {
@@ -304,7 +301,7 @@ async function initApp() {
           if (status === 'ready') updateModelStatus('whisper', 'ready');
         }).catch(err => console.error('Switch-time preload failed:', err));
       }
-      
+
       showToast('Engine switched', 'success');
     } catch (err) {
       showToast(`Failed: ${err.message}`, 'error');
@@ -932,44 +929,9 @@ async function initApp() {
     else if (show) { el.ttsProgressFill.style.width = '100%'; el.ttsProgressFill.style.animation = 'pulse 1.5s infinite'; }
   }
 
-  function getSelectedTTSEngine() {
-    return el.ttsEngineSelect ? el.ttsEngineSelect.value : 'kokoro';
-  }
-
-  if (el.ttsEngineSelect) {
-    el.ttsEngineSelect.addEventListener('change', () => {
-      // Re-initialize worker if it changes
-      if (ttsWorker) {
-        ttsWorker.terminate();
-        ttsWorker = null;
-      }
-      const engine = getSelectedTTSEngine();
-      if (engine === 'mms') {
-        if (el.ttsSpeedWrap) el.ttsSpeedWrap.style.display = 'none';
-      } else {
-        if (el.ttsSpeedWrap) el.ttsSpeedWrap.style.display = 'flex';
-      }
-      // Reset statuses
-      if (el.kokoroReadiness) {
-        el.kokoroReadiness.textContent = 'Not loaded';
-        el.kokoroReadiness.dataset.state = 'idle';
-      }
-      el.ttsVoiceSelect.innerHTML = '';
-      initTTSWorker();
-    });
-    // Trigger initial state
-    if (el.ttsEngineSelect.value === 'mms' && el.ttsSpeedWrap) {
-      el.ttsSpeedWrap.style.display = 'none';
-    }
-  }
-
   function initTTSWorker() {
     if (ttsWorker) return;
-
-    const engine = getSelectedTTSEngine();
-    const workerFile = engine === 'mms' ? 'engines/mms-tts-worker.js' : 'engines/kokoro-tts-worker.js';
-
-    ttsWorker = new Worker(workerFile, { type: 'module' });
+    ttsWorker = new Worker('engines/tts-worker.js', { type: 'module' });
     ttsWorker.postMessage({ action: 'list_voices', id: 'voices' });
     ttsWorker.onmessage = e => {
       const { status, id } = e.data;
@@ -977,13 +939,12 @@ async function initApp() {
         el.ttsVoiceSelect.innerHTML = e.data.voices.map(v =>
           `<option value="${v.id}">${v.name}</option>`
         ).join('');
-        el.ttsVoiceSelect.style.display = e.data.voices.length > 1 ? 'inline-block' : 'none';
         return;
       }
-      if (status === 'loading') { setTTSProgress(true, `Loading ${engine} model…`); updateKokoroStatus('loading'); }
+      if (status === 'loading') { setTTSProgress(true, 'Loading Kokoro model…'); updateKokoroStatus('loading'); }
       else if (status === 'progress') {
         const d = e.data.data || {};
-        setTTSProgress(true, `Downloading: ${d.file || engine} (${Math.round(d.progress || 0)}%)`, d.progress);
+        setTTSProgress(true, `Downloading: ${d.file || 'kokoro'} (${Math.round(d.progress || 0)}%)`, d.progress);
         updateKokoroStatus('progress', d);
       } else if (status === 'ready') { setTTSProgress(false); updateKokoroStatus('ready'); }
       else if (status === 'generating') { setTTSProgress(true, 'Generating speech…'); }
@@ -1060,10 +1021,9 @@ async function initApp() {
     if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); el.ttsSpeakBtn.click(); }
   });
 
-  // "Preload All" also warms up the TTS model
+  // "Preload All" also warms up the Kokoro TTS model
   el.preloadModelsBtn.addEventListener('click', () => {
     initTTSWorker();
-    ttsWorker.postMessage({ action: 'preload', id: 'tts-preload-' + Date.now() });
+    ttsWorker.postMessage({ action: 'preload', id: 'kokoro-preload-' + Date.now() });
   });
 }
-
