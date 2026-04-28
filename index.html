@@ -114,13 +114,13 @@
             <div class="progress-track"><div id="whisperProgressBar" class="progress-fill"></div></div>
           </div>
         </div>
-        <!-- TTS Model -->
+        <!-- Kokoro TTS -->
         <div class="model-card" id="kokoroModelCard">
           <div class="model-card-header">
             <div class="model-card-icon">🔊</div>
             <div class="model-card-info">
-              <div class="model-card-name">MMS TTS (English)</div>
-              <div class="model-card-desc">Text-to-speech · <code>Xenova/mms-tts-eng</code></div>
+              <div class="model-card-name">Kokoro-82M TTS</div>
+              <div class="model-card-desc">Text-to-speech · <code>onnx-community/Kokoro-82M-v1.0-ONNX</code> · ~82 MB</div>
             </div>
             <div class="model-readiness-badge" id="kokoroReadiness" data-state="idle">Not loaded</div>
           </div>
@@ -179,11 +179,10 @@
             <span id="ttsSpeakLabel">Speak</span>
           </button>
           <button id="ttsStopBtn" class="btn-ghost" style="display:none;" aria-label="Stop speaking">⏹ Stop</button>
-          <button id="ttsDownloadBtn" class="btn-ghost" style="display:none;" aria-label="Download TTS audio">⬇️ Download Audio</button>
-          <select id="ttsVoiceSelect" class="tts-voice-select" aria-label="TTS voice" style="display:none;">
+          <select id="ttsVoiceSelect" class="tts-voice-select" aria-label="TTS voice">
             <option value="af_heart">❤️ Heart (US Female)</option>
           </select>
-          <div class="tts-speed-wrap" title="Speech speed" style="display:none;">
+          <div class="tts-speed-wrap" title="Speech speed">
             <span class="tts-speed-label">🐢</span>
             <input type="range" id="ttsSpeedSlider" min="0.5" max="2" step="0.1" value="1" aria-label="Speech speed" />
             <span class="tts-speed-label">🐇</span>

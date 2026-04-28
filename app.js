@@ -1,7 +1,7 @@
 import {
   applyTheme, getStoredTheme, toggleTheme, showToast,
   WaveformVisualizer, RecordingTimer,
-  exportNote, saveNote, loadAllNotes, deleteNote, clearAllNotes, encodeWAV, downloadFile
+  exportNote, saveNote, loadAllNotes, deleteNote, clearAllNotes
 } from './app-utils.js';
 import transcriptionQueue, { MAX_WORKERS } from './engines/transcription-queue.js';
 
@@ -156,7 +156,6 @@ async function initApp() {
     ttsSpeakIcon: document.getElementById('ttsSpeakIcon'),
     ttsSpeakLabel: document.getElementById('ttsSpeakLabel'),
     ttsStopBtn: document.getElementById('ttsStopBtn'),
-    ttsDownloadBtn: document.getElementById('ttsDownloadBtn'),
     ttsVoiceSelect: document.getElementById('ttsVoiceSelect'),
     ttsSpeedSlider: document.getElementById('ttsSpeedSlider'),
     ttsSpeedValue: document.getElementById('ttsSpeedValue'),
@@ -902,8 +901,6 @@ async function initApp() {
   let ttsAudioCtx = null;
   let ttsSource = null;
   let ttsSpeaking = false;
-  let lastTTSAudioData = null;
-  let lastTTSSampleRate = null;
 
   function updateKokoroStatus(status, data) {
     if (!el.kokoroReadiness) return;
@@ -953,9 +950,6 @@ async function initApp() {
       } else if (status === 'success') {
         setTTSProgress(false);
         const { audio, sampleRate } = e.data;
-        lastTTSAudioData = audio;
-        lastTTSSampleRate = sampleRate;
-        el.ttsDownloadBtn.style.display = '';
         ttsAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
         const buf = ttsAudioCtx.createBuffer(1, audio.length, sampleRate);
         buf.copyToChannel(audio, 0);
@@ -985,7 +979,6 @@ async function initApp() {
     const voice = el.ttsVoiceSelect.value || 'af_heart';
     const speed = parseFloat(el.ttsSpeedSlider.value) || 1.0;
     el.ttsSpeakBtn.disabled = true;
-    el.ttsDownloadBtn.style.display = 'none';
     el.ttsSpeakIcon.textContent = '⏳';
     el.ttsSpeakLabel.textContent = 'Speaking…';
     ttsWorker.postMessage({ action: 'generate', text, voice, speed, id: 'tts-' + Date.now() });
@@ -1000,16 +993,6 @@ async function initApp() {
     el.ttsSpeakIcon.textContent = '🔊';
     el.ttsSpeakLabel.textContent = 'Speak';
     setTTSProgress(false);
-  });
-
-  el.ttsDownloadBtn.addEventListener('click', () => {
-    if (!lastTTSAudioData || !lastTTSSampleRate) {
-      showToast('No audio generated yet.', 'warning');
-      return;
-    }
-    const filename = `tts-audio-${new Date().getTime()}.wav`;
-    const wavView = encodeWAV(lastTTSAudioData, lastTTSSampleRate);
-    downloadFile(filename, wavView, 'audio/wav');
   });
 
   el.ttsSpeedSlider.addEventListener('input', () => {
