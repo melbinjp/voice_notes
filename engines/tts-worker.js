@@ -1,9 +1,8 @@
 // engines/tts-worker.js
-// Offline Text-to-Speech via Kokoro-82M (q8 quantised, ~82 MB)
-// Model: onnx-community/Kokoro-82M-v1.0-ONNX
-// Uses @huggingface/transformers v3 (successor to @xenova/transformers)
+// Offline Text-to-Speech via Xenova/mms-tts-eng
+// Model: Xenova/mms-tts-eng
 
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.0/dist/transformers.min.js';
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
 env.allowLocalModels  = false;
 env.useBrowserCache   = true;
@@ -30,16 +29,14 @@ class KokoroPipeline {
     static async getInstance(onProgress) {
         if (!this.instance) {
             const opts = {
-                dtype: 'q8',
-                device: navigator.gpu ? 'webgpu' : 'wasm',
+                quantized: true,
                 progress_callback: onProgress,
             };
-            this.instance = pipeline('text-to-speech', 'onnx-community/Kokoro-82M-v1.0-ONNX', opts)
+            this.instance = pipeline('text-to-speech', 'Xenova/mms-tts-eng', opts)
                 .catch(() => {
-                    // WebGPU failed → retry with WASM
                     this.instance = null;
-                    return pipeline('text-to-speech', 'onnx-community/Kokoro-82M-v1.0-ONNX', {
-                        dtype: 'q8',
+                    return pipeline('text-to-speech', 'Xenova/mms-tts-eng', {
+                        quantized: true,
                         progress_callback: onProgress,
                     });
                 });
@@ -108,8 +105,8 @@ self.onmessage = async (e) => {
                 for (let i = 0; i < sentences.length; i++) {
                     const chunk = sentences[i];
                     if (!chunk) continue;
-                    const out = await tts(chunk, { voice, speed });
-                    sampleRate = out.sampling_rate || 24000;
+                    const out = await tts(chunk);
+                    sampleRate = out.sampling_rate || 16000;
                     allAudio.push(out.audio); // Float32Array per chunk
                     self.postMessage({ status: 'chunk', current: i + 1, total: sentences.length, id });
                 }
