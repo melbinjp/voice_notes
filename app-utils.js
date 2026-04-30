@@ -156,11 +156,42 @@ export function exportNote(note, format) {
       'text/markdown');
   } else if (format === 'json') {
     downloadFile(`${safe}.json`, JSON.stringify(note, null, 2), 'application/json');
+  } else if (format === 'srt') {
+    let srtContent = '';
+    if (note.chunks && note.chunks.length > 0) {
+      const formatTime = (secs) => {
+        const d = new Date(Math.max(0, secs) * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, '0');
+        const mm = String(d.getUTCMinutes()).padStart(2, '0');
+        const ss = String(d.getUTCSeconds()).padStart(2, '0');
+        const ms = String(d.getUTCMilliseconds()).padStart(3, '0');
+        return `${hh}:${mm}:${ss},${ms}`;
+      };
+      
+      let index = 1;
+      for (const chunk of note.chunks) {
+        // Handle both Whisper native format and normalized interactive format
+        const text = chunk.text || chunk.word || '';
+        const start = chunk.timestamp ? chunk.timestamp[0] : (chunk.start || 0);
+        const end = chunk.timestamp ? chunk.timestamp[1] : (chunk.end || 0);
+        
+        // Skip chunks with no end time (sometimes happens at the end of audio)
+        if (end === null || end === undefined) continue;
+
+        srtContent += `${index}\n`;
+        srtContent += `${formatTime(start)} --> ${formatTime(end)}\n`;
+        srtContent += `${text.trim()}\n\n`;
+        index++;
+      }
+    } else {
+      srtContent = "1\n00:00:00,000 --> 00:00:05,000\nNo timing data available for this transcript.\n\n";
+    }
+    downloadFile(`${safe}.srt`, srtContent, 'text/plain');
   }
 }
 
 // ── IndexedDB ───────────────────────────────────────────────────────────
-const DB_NAME = 'voiceNotesDB', DB_VER = 3, STORE = 'history';
+const DB_NAME = 'voiceNotesDB', DB_VER = 4, STORE = 'history', AUDIO_STORE = 'audioCache';
 
 export function openDB() {
   return new Promise((resolve, reject) => {
@@ -169,6 +200,10 @@ export function openDB() {
       const db = e.target.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+      }
+      if (!db.objectStoreNames.contains(AUDIO_STORE)) {
+        const audioStore = db.createObjectStore(AUDIO_STORE, { keyPath: 'noteId' });
+        audioStore.createIndex('expiresAt', 'expiresAt', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -202,12 +237,14 @@ export async function loadAllNotes() {
 
 export async function deleteNote(id) {
   const db = await openDB();
-  const tx = db.transaction(STORE, 'readwrite');
+  const tx = db.transaction([STORE, AUDIO_STORE], 'readwrite');
   await new Promise((res, rej) => {
     const r = tx.objectStore(STORE).delete(id);
     r.onsuccess = () => res();
     r.onerror = () => rej(r.error);
   });
+  // Also clean up cached audio blob for this note
+  try { tx.objectStore(AUDIO_STORE).delete(id); } catch (_) {}
   db.close();
 }
 
@@ -249,11 +286,85 @@ export async function saveBatchNotes(notes) {
 
 export async function clearAllNotes() {
   const db = await openDB();
-  const tx = db.transaction(STORE, 'readwrite');
+  const tx = db.transaction([STORE, AUDIO_STORE], 'readwrite');
   await new Promise((res, rej) => {
     const r = tx.objectStore(STORE).clear();
     r.onsuccess = () => res();
     r.onerror = () => rej(r.error);
   });
+  try { tx.objectStore(AUDIO_STORE).clear(); } catch (_) {}
   db.close();
+}
+
+// ── Audio Blob Cache (with TTL) ─────────────────────────────────────────
+// Default TTL: 24 hours. Audio blobs are stored temporarily for interactive
+// playback and auto-deleted after expiry to save storage.
+
+const AUDIO_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export async function saveAudioBlob(noteId, blob, sourceName = '', ttlMs = AUDIO_TTL_MS) {
+  const db = await openDB();
+  const tx = db.transaction(AUDIO_STORE, 'readwrite');
+  await new Promise((res, rej) => {
+    const r = tx.objectStore(AUDIO_STORE).put({
+      noteId,
+      blob,
+      sourceName,
+      savedAt: Date.now(),
+      expiresAt: Date.now() + ttlMs,
+    });
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+  db.close();
+}
+
+export async function getAudioBlob(noteId) {
+  const db = await openDB();
+  const tx = db.transaction(AUDIO_STORE, 'readonly');
+  const entry = await new Promise((res, rej) => {
+    const r = tx.objectStore(AUDIO_STORE).get(noteId);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  db.close();
+  if (!entry) return null;
+  // Check if expired
+  if (entry.expiresAt && entry.expiresAt < Date.now()) {
+    deleteAudioBlob(noteId).catch(() => {});
+    return null;
+  }
+  return entry;
+}
+
+export async function deleteAudioBlob(noteId) {
+  const db = await openDB();
+  const tx = db.transaction(AUDIO_STORE, 'readwrite');
+  await new Promise((res, rej) => {
+    const r = tx.objectStore(AUDIO_STORE).delete(noteId);
+    r.onsuccess = () => res();
+    r.onerror = () => rej(r.error);
+  });
+  db.close();
+}
+
+export async function cleanExpiredAudioBlobs() {
+  const db = await openDB();
+  const tx = db.transaction(AUDIO_STORE, 'readwrite');
+  const store = tx.objectStore(AUDIO_STORE);
+  const now = Date.now();
+  const all = await new Promise((res, rej) => {
+    const r = store.getAll();
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  let cleaned = 0;
+  for (const entry of all) {
+    if (entry.expiresAt && entry.expiresAt < now) {
+      store.delete(entry.noteId);
+      cleaned++;
+    }
+  }
+  db.close();
+  return cleaned;
 }

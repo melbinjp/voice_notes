@@ -75,12 +75,10 @@
         <span class="section-label">📁 Transcribe Audio Files</span>
         <span id="bulkQueueCount" class="word-count-badge" style="display:none;">0 files</span>
       </div>
-      <label for="audioFile" style="display:block; cursor:pointer;">
-        <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Drop audio files here or click to browse">
-          Drop audio files here or <strong>click to browse</strong><br>
-          <span style="font-size:0.78rem; opacity:0.7;">Supports multiple files — all transcribed in parallel</span>
-        </div>
-      </label>
+      <div class="upload-area" id="uploadArea" role="button" tabindex="0" aria-label="Drop audio files here or click to browse">
+        Drop audio files here or <strong>click to browse</strong><br>
+        <span style="font-size:0.78rem; opacity:0.7;">Supports multiple files — all transcribed in parallel</span>
+      </div>
       <input type="file" id="audioFile" accept="audio/*" multiple style="display:none;" aria-label="Choose audio files" />
       <div class="action-row" style="margin-top: 12px; align-items: center;">
         <button id="transcribeFileBtn" class="btn-primary" disabled aria-label="Transcribe selected files">🎵 Transcribe All</button>
@@ -149,6 +147,14 @@
     </div>
 
     <audio id="audioPlayback" class="sticky-audio" controls style="display:none; margin-bottom: 12px; width: 100%; border-radius: var(--radius); background: var(--bg-card); box-shadow: var(--shadow-sm);" aria-label="Audio playback"></audio>
+    <div id="attachAudioWrap" style="display:none; margin-bottom:12px; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label class="btn-ghost" style="cursor:pointer; font-size:0.82rem; padding:6px 12px;" title="Attach an audio file for interactive transcript editing">
+        🎵 Attach Audio
+        <input type="file" id="attachAudioInput" accept="audio/*" style="display:none;" aria-label="Attach audio file for interactive editing" />
+      </label>
+      <button id="detachAudioBtn" class="btn-ghost" style="display:none; font-size:0.82rem; padding:6px 12px; color:var(--danger);" aria-label="Remove attached audio">✕ Detach</button>
+      <span id="attachedAudioName" style="font-size:0.76rem; color:var(--text-muted);"></span>
+    </div>
 
     <!-- Transcript Card -->
     <div class="card" role="region" aria-label="Transcript">
@@ -179,8 +185,22 @@
             <span id="ttsSpeakLabel">Speak</span>
           </button>
           <button id="ttsStopBtn" class="btn-ghost" style="display:none;" aria-label="Stop speaking">⏹ Stop</button>
+          <select id="ttsFormatSelect" class="tts-voice-select" style="display:none; max-width:90px;" aria-label="Audio download format">
+            <option value="mp3" selected>MP3</option>
+            <option value="wav">WAV</option>
+          </select>
+          <button id="ttsDownloadBtn" class="btn-ghost" style="display:none;" aria-label="Download generated audio">⬇️ Download</button>
           <select id="ttsVoiceSelect" class="tts-voice-select" aria-label="TTS voice">
             <option value="af_heart">❤️ Heart (US Female)</option>
+            <option value="af_bella">🌸 Bella (US Female)</option>
+            <option value="af_sarah">☀️ Sarah (US Female)</option>
+            <option value="af_nicole">🎙️ Nicole (US Female)</option>
+            <option value="am_adam">🎤 Adam (US Male)</option>
+            <option value="am_michael">🎧 Michael (US Male)</option>
+            <option value="bf_emma">🫖 Emma (UK Female)</option>
+            <option value="bf_isabella">🌹 Isabella (UK Female)</option>
+            <option value="bm_george">🎩 George (UK Male)</option>
+            <option value="bm_lewis">📻 Lewis (UK Male)</option>
           </select>
           <div class="tts-speed-wrap" title="Speech speed">
             <span class="tts-speed-label">🐢</span>
@@ -195,6 +215,56 @@
           </div>
           <span id="ttsProgressLabel" class="tts-progress-label">Loading Kokoro…</span>
         </div>
+        <details class="tts-multi-hint" style="margin-top:6px; font-size:0.76rem; color:var(--text-muted); cursor:pointer;">
+          <summary title="Multi-speaker mode: assign different voices to lines of text">🎭 Multi-Speaker Mode</summary>
+          <div style="margin-top:6px; padding:10px 14px; background:var(--bg-card); border-radius:var(--radius); line-height:1.7;">
+            <p style="margin:0 0 6px; font-weight:600;">Prefix lines with <code>[Name]:</code> to assign voices:</p>
+            <pre id="ttsExampleScript" style="margin:4px 0 10px; font-size:0.72rem; opacity:0.9; white-space:pre-wrap; background:var(--bg-input); padding:8px 10px; border-radius:6px; border:1px solid var(--border); cursor:pointer;" title="Click to copy">[Heart]: Hello, welcome to the show!
+[Adam]: Thanks for having me.
+[Emma]: Let's get started, shall we?
+[Heart+Adam]: This line uses a blended voice.
+[Narrator]: Custom aliases work too — define them below!</pre>
+            <p style="margin:0 0 4px; font-weight:600;">🎤 Available Voices:</p>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 16px; font-size:0.72rem; margin-bottom:8px;">
+              <span>❤️ <strong>Heart</strong> — US Female</span>
+              <span>🌸 <strong>Bella</strong> — US Female</span>
+              <span>☀️ <strong>Sarah</strong> — US Female</span>
+              <span>🎙️ <strong>Nicole</strong> — US Female</span>
+              <span>🎤 <strong>Adam</strong> — US Male</span>
+              <span>🎧 <strong>Michael</strong> — US Male</span>
+              <span>🫖 <strong>Emma</strong> — UK Female</span>
+              <span>🌹 <strong>Isabella</strong> — UK Female</span>
+              <span>🎩 <strong>George</strong> — UK Male</span>
+              <span>📻 <strong>Lewis</strong> — UK Male</span>
+            </div>
+            <p style="margin:0 0 4px; font-size:0.72rem;">🔀 <strong>Blend:</strong> <code>[Heart+Adam]:</code> <code>[Emma+George]:</code> <code>[Bella+Michael]:</code> <span style="opacity:0.7;font-style:italic">(Coming Soon)</span></p>
+            <pre style="margin:4px 0 10px; font-size:0.72rem; opacity:0.9; white-space:pre-wrap; background:var(--bg-input); padding:8px 10px; border-radius:6px; border:1px solid var(--border);">[Heart]: Hello, welcome to the show!
+[Adam]: Thanks for having me.</pre>
+
+            <hr style="border:none; border-top:1px solid var(--border); margin:10px 0;">
+            <p style="margin:0 0 6px; font-weight:600;">✏️ Custom Narrator Aliases <span style="font-weight:400; opacity:0.7;">(saved in browser)</span></p>
+            <p style="margin:0 0 6px; font-size:0.7rem; opacity:0.8;">Create your own character names that map to voices or blends. Use them with <code>[AliasName]:</code> in your script.</p>
+            <div id="ttsAliasEditor" style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;"></div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+              <input type="text" id="ttsAliasName" placeholder="Alias (e.g. SPEAKER_00)" style="flex:1; padding:5px 8px; font-size:0.74rem; min-width:80px;" />
+              <select id="ttsAliasVoiceSelect" style="flex:1; padding:5px; font-size:0.74rem; min-width:100px;">
+                <option value="af_heart">❤️ Heart (US Female)</option>
+                <option value="af_bella">🌸 Bella (US Female)</option>
+                <option value="af_sarah">☀️ Sarah (US Female)</option>
+                <option value="af_nicole">🎙️ Nicole (US Female)</option>
+                <option value="am_adam">🎤 Adam (US Male)</option>
+                <option value="am_michael">🎧 Michael (US Male)</option>
+                <option value="bf_emma">🫖 Emma (UK Female)</option>
+                <option value="bf_isabella">🌹 Isabella (UK Female)</option>
+                <option value="bm_george">🎩 George (UK Male)</option>
+                <option value="bm_lewis">📻 Lewis (UK Male)</option>
+                <option value="custom">⚙️ Custom / Blend...</option>
+              </select>
+              <input type="text" id="ttsAliasVoice" placeholder="Voice" style="flex:1; padding:5px 8px; font-size:0.74rem; min-width:80px; display:none;" />
+              <button id="ttsAliasAddBtn" class="btn-ghost" style="padding:5px 10px; font-size:0.72rem; white-space:nowrap;">+ Add</button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div class="action-row">
@@ -205,12 +275,73 @@
             <button id="exportTxt"  role="menuitem">📄 Plain Text (.txt)</button>
             <button id="exportMd"   role="menuitem">📘 Markdown (.md)</button>
             <button id="exportJson" role="menuitem">📊 JSON (.json)</button>
+            <button id="exportSrt"  role="menuitem">🎬 Subtitles (.srt)</button>
           </div>
         </div>
+        <button id="identifySpeakersBtn" class="btn-ghost" aria-label="Identify speakers via audio diarization" style="display:none;">👥 Identify Speakers</button>
         <button id="sendToLLMBtn" class="btn-primary" aria-label="Summarize transcript offline">🤖 Summarize</button>
+        <button id="analyzeEmotionsBtn" class="btn-ghost" aria-label="Analyze emotions in audio">🎭 Emotions</button>
+        <button id="scriptPromptBtn" class="btn-ghost" aria-label="Generate script prompt for LLM">✍️ Script Prompt</button>
+      </div>
+
+      <div id="diarizationProgress" class="tts-progress" style="display:none; margin-top:8px;">
+        <div class="tts-progress-bar-wrap">
+          <div id="diarizationProgressFill" class="progress-fill tts-progress-fill"></div>
+        </div>
+        <span id="diarizationProgressLabel" class="tts-progress-label">Loading Diarization Model…</span>
+      </div>
+
+      <!-- Audio Insights Panel -->
+      <details id="audioInsightsPanel" class="audio-insights-panel" style="display:none;">
+        <summary class="section-label" style="cursor:pointer; padding:8px 0;">📊 Audio Insights</summary>
+        <div class="insights-grid" id="insightsGrid">
+          <div class="insight-card">
+            <span class="insight-icon">⏱️</span>
+            <span class="insight-label">Duration</span>
+            <span class="insight-value" id="insightDuration">—</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">💬</span>
+            <span class="insight-label">Speaking Pace</span>
+            <span class="insight-value" id="insightPace">—</span>
+            <span class="insight-sub" id="insightPaceLabel"></span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">🔊</span>
+            <span class="insight-label">Avg Volume</span>
+            <span class="insight-value" id="insightVolume">—</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">📈</span>
+            <span class="insight-label">Peak</span>
+            <span class="insight-value" id="insightPeak">—</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">🤫</span>
+            <span class="insight-label">Silence</span>
+            <span class="insight-value" id="insightSilence">—</span>
+          </div>
+          <div class="insight-card">
+            <span class="insight-icon">⏸️</span>
+            <span class="insight-label">Pauses</span>
+            <span class="insight-value" id="insightPauses">—</span>
+          </div>
+        </div>
+        <div class="sparkline-wrap">
+          <span class="insight-label" style="font-size:0.72rem;">Volume Over Time</span>
+          <canvas id="sparklineCanvas" width="600" height="48"></canvas>
+        </div>
+      </details>
+
+      <!-- Emotion Analysis Results -->
+      <div id="emotionResults" class="emotion-results" style="display:none;">
+        <div class="section-header" style="margin-bottom:6px;">
+          <span class="section-label">🎭 Emotion Analysis</span>
+        </div>
+        <div id="emotionBars" class="emotion-bars"></div>
+        <div id="emotionTimeline" class="emotion-timeline"></div>
       </div>
     </div>
-
     <!-- Summary Card -->
     <div class="card" role="region" aria-label="Summary">
       <div class="section-header">
@@ -333,6 +464,6 @@
   </nav>
 </footer>
 
-<script type="module" src="app.js?v=11"></script>
+<script type="module" src="app.js?v=26"></script>
 </body>
 </html>

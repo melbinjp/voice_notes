@@ -1,4 +1,4 @@
-const CACHE = 'voice-notes-v5';
+const CACHE = 'voice-notes-v13';
 const SHELL = [
   './', './index.html', './app.js', './app-utils.js', './style.css',
   './manifest.json', './icon-192.png', './icon-512.png',
@@ -9,6 +9,7 @@ const SHELL = [
   './engines/whisper-worker.js',
   './engines/transcription-queue.js',
   './engines/tts-worker.js',
+  './engines/audio-analytics.js',
 ];
 
 self.addEventListener('install', e => {
@@ -26,14 +27,29 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  // Only cache GET requests
+  if (e.request.method !== 'GET') {
+    return;
+  }
+
   const url = new URL(e.request.url);
 
   // CDN & external — network first with cache fallback
   if (url.origin !== location.origin) {
     e.respondWith(
       fetch(e.request)
-        .then(r => { const c = r.clone(); caches.open(CACHE).then(ca => ca.put(e.request, c)); return r; })
-        .catch(() => caches.match(e.request))
+        .then(r => {
+          if (r && r.ok && r.type !== 'opaque') {
+            const c = r.clone();
+            caches.open(CACHE).then(ca => ca.put(e.request, c).catch(() => {}));
+          }
+          return r;
+        })
+        .catch(async () => {
+          const cached = await caches.match(e.request);
+          if (cached) return cached;
+          return new Response('Network error', { status: 503, statusText: 'Service Unavailable' });
+        })
     );
     return;
   }
@@ -43,12 +59,15 @@ self.addEventListener('fetch', e => {
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(r => {
-        if (r.ok) {
+        if (r && r.ok && r.type !== 'opaque') {
           const c = r.clone();
-          caches.open(CACHE).then(ca => ca.put(e.request, c));
+          caches.open(CACHE).then(ca => ca.put(e.request, c).catch(() => {}));
         }
         return r;
+      }).catch(async () => {
+         const fallback = await caches.match('./index.html');
+         return fallback || new Response('Offline', { status: 503 });
       });
-    }).catch(() => caches.match('./index.html'))
+    })
   );
 });
