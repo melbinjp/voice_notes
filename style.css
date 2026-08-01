@@ -653,7 +653,22 @@ footer {
 }
 footer a { color: inherit; text-decoration: none; }
 footer a:hover { color: var(--primary); }
-.footer-links { display: flex; justify-content: center; gap: 20px; margin-top: 8px; }
+/* Keeps this tool's own tokens rather than the shared .wcua-footer block, but
+   matches its behaviour: the row wraps instead of overflowing a narrow screen,
+   and each link is a 44px touch target. */
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 20px;
+  margin-top: 8px;
+}
+.footer-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+}
 
 /* ── AI Model Status Cards ── */
 .model-status-grid {
