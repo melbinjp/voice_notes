@@ -296,14 +296,31 @@ export function seedLibrary() {
     { id: "folder_meetings", name: "Meetings", createdAt: now },
     { id: "folder_ideas", name: "Ideas", createdAt: now },
   ];
+  const alex = { id: "sp_alex", name: "Alex", color: "#d4785a", voiceId: "am_adam" };
+  const maya = { id: "sp_maya", name: "Maya", color: "#5b8f8a", voiceId: "af_bella" };
   const notes = [
     {
       id: uid(), title: "Welcome to Voice Notes",
-      transcript: "This is your private studio. Record with the space bar, pause mid-thought, and everything stays on this device. Transcripts, audio, and summaries never leave the browser.",
-      summary: "Voice Notes is a fully private, on-device studio. Record with Space and keep audio locally.",
+      transcript: "This is your private studio. Record with the space bar, pause mid-thought, and everything stays on this device. Press Offline Ready once on Wi-Fi to cache Whisper and the studio voices. After that, capture, transcribe, separate speakers, and read notes aloud with no network.",
+      summary: "Private on-device studio. Record with Space. Offline Ready caches Whisper and studio voices so capture, diarization, and speech work without a network.",
       tags: ["guide", "start-here"], folderId: "folder_guides", pinned: true, archived: false,
       createdAt: now - 3600000, updatedAt: now - 3600000, durationMs: 0, engine: "manual",
+      language: "en-US", timedWords: [], audioId: null, audioMime: null, speakers: [], speakerTurns: [],
+    },
+    {
+      id: uid(), title: "Studio standup",
+      transcript: "Alex: We should ship speaker labels with the recording, not as a later pass.\n\nMaya: Agreed. If two people are in the take, the transcript has to read as a conversation.\n\nAlex: Offline Ready should pull Whisper and the voices in one tap.\n\nMaya: And mobile has to feel like a recorder, not a desktop squeezed down.",
+      summary: "Standup on capture quality: speaker labels belong in the take, Offline Ready is one tap, and mobile should feel like a recorder.",
+      tags: ["product", "standup"], folderId: "folder_meetings", pinned: false, archived: false,
+      createdAt: now - 86400000, updatedAt: now - 86400000, durationMs: 96000, engine: "whisper",
       language: "en-US", timedWords: [], audioId: null, audioMime: null,
+      speakers: [alex, maya],
+      speakerTurns: [
+        { speakerId: alex.id, start: 0, end: 6.4, text: "We should ship speaker labels with the recording, not as a later pass." },
+        { speakerId: maya.id, start: 6.8, end: 14.2, text: "Agreed. If two people are in the take, the transcript has to read as a conversation." },
+        { speakerId: alex.id, start: 14.6, end: 21.8, text: "Offline Ready should pull Whisper and the voices in one tap." },
+        { speakerId: maya.id, start: 22.2, end: 28.4, text: "And mobile has to feel like a recorder, not a desktop squeezed down." },
+      ],
     },
   ];
   return { notes, folders };

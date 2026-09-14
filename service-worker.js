@@ -1,4 +1,4 @@
-const CACHE = 'voice-notes-v12';
+const CACHE = 'voice-notes-v13';
 const SHELL = [
   './', './index.html', './app.js', './app-utils.js', './style.css',
   './manifest.json', './icon-192.png', './icon-512.png',
@@ -9,11 +9,15 @@ const SHELL = [
   './engines/whisper-worker.js',
   './engines/transcription-queue.js',
   './engines/tts-worker.js',
+  './engines/tts.js',
+  './engines/diarize.js',
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())
+    caches.open(CACHE).then(c =>
+      Promise.all(SHELL.map(u => c.add(u).catch(() => undefined)))
+    ).then(() => self.skipWaiting())
   );
 });
 
@@ -27,24 +31,20 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) {
-    e.respondWith(
-      fetch(e.request)
-        .then(r => { const c = r.clone(); caches.open(CACHE).then(ca => ca.put(e.request, c)); return r; })
-        .catch(() => caches.match(e.request))
-    );
-    return;
-  }
+  if (e.request.method !== 'GET') return;
+  const modelHost = /jsdelivr\.net|huggingface\.co|hf\.co/.test(url.hostname);
+  if (url.origin !== location.origin && !modelHost) return;
   e.respondWith(
     caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(r => {
-        if (r.ok) {
+      const fetched = fetch(e.request).then(r => {
+        if (r && r.ok) {
           const c = r.clone();
           caches.open(CACHE).then(ca => ca.put(e.request, c));
         }
         return r;
-      });
-    }).catch(() => caches.match('./index.html'))
+      }).catch(() => cached || (url.origin === location.origin ? caches.match('./index.html') : undefined));
+      if (modelHost) return cached || fetched;
+      return fetched.then(r => r || cached);
+    })
   );
 });

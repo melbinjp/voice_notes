@@ -3,10 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="Private, offline voice notes. Record, transcribe, summarize, and search — entirely on your device." />
-  <meta name="theme-color" content="#0c0c0b" />
+  <meta name="description" content="Private, offline voice studio. Record, transcribe, separate speakers, and speak notes back — entirely on your device." />
+  <meta name="theme-color" content="#0a0b0d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="style.css" />
   <title>Voice Notes</title>
   <link rel="canonical" href="https://melbinjp.github.io/voice_notes/">
@@ -31,7 +33,7 @@
       </div>
       <div class="row">
         <button class="btn btn-sm" id="newNoteBtn" style="flex:1">New note</button>
-        <button class="btn btn-sm btn-secondary" id="sidebarRecordBtn" aria-label="Record">Rec</button>
+        <button class="btn btn-sm btn-record" id="sidebarRecordBtn" aria-label="Record">Rec</button>
       </div>
       <div class="search-wrap">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3-3"/></svg>
@@ -54,14 +56,20 @@
 
     <div class="main">
       <header class="topbar" id="topbar">
-        <button class="btn-icon" id="menuBtn" aria-label="Open library">☰</button>
-        <div style="display:flex;gap:4px">
+        <button class="btn-icon menu-btn" id="menuBtn" aria-label="Open library">☰</button>
+        <div class="brand-mobile">
+          <strong>Voice Notes</strong>
+          <span>Private studio</span>
+        </div>
+        <div class="topbar-actions">
+          <span id="offlineBadge" class="offline-badge hidden">Offline</span>
+          <button class="pack-chip" id="offlineReadyBtn" aria-label="Offline Ready">Offline Ready</button>
           <button class="btn-icon" id="commandBtn" aria-label="Search">⌘</button>
-          <button class="btn-icon" id="shortcutsBtn" aria-label="Shortcuts">?</button>
+          <button class="btn-icon hide-sm" id="shortcutsBtn" aria-label="Shortcuts">?</button>
           <button class="btn-icon" id="settingsBtn" aria-label="Settings">⚙</button>
         </div>
       </header>
-      <div id="queueStrip" class="hidden" style="border-bottom:1px solid var(--border);padding:8px 16px;font-size:12px;color:var(--muted)"></div>
+      <div id="queueStrip" class="hidden queue-strip"></div>
       <main id="editorRoot"></main>
       <p class="footer-note" id="statusBar">Stored only on this device</p>
     </div>
@@ -70,7 +78,7 @@
   <nav class="mobile-nav" aria-label="Mobile">
     <button id="tabLibrary">Library</button>
     <button id="tabRecord" aria-label="Record"><span class="fab" id="fabRec">●</span></button>
-    <button id="tabNote">Note</button>
+    <button id="tabNote"><span id="tabNoteLabel">Note</span></button>
   </nav>
 
   <div class="modal" id="settingsModal">
@@ -87,7 +95,21 @@
       </div>
       <div class="switch-row"><span>Auto-title from first words</span><input type="checkbox" id="autoTitle" checked /></div>
       <div class="switch-row"><span>Summarize after capture</span><input type="checkbox" id="autoSummarize" checked /></div>
+      <div class="switch-row"><span>Identify speakers after capture</span><input type="checkbox" id="autoDiarize" checked /></div>
+      <div class="field">
+        <label for="speakerCount">Expected speakers</label>
+        <select id="speakerCount">
+          <option value="auto">Auto</option>
+          <option value="2">Two</option>
+          <option value="3">Three</option>
+          <option value="4">Four</option>
+        </select>
+      </div>
       <div class="switch-row"><span>Spoken punctuation</span><input type="checkbox" id="dictationPunctuation" checked /></div>
+      <div class="field">
+        <label for="ttsVoice">Default studio voice</label>
+        <select id="ttsVoice"></select>
+      </div>
       <div class="field">
         <label for="themeSelect">Theme</label>
         <select id="themeSelect">
@@ -101,8 +123,8 @@
         <input type="range" id="fontSizeSlider" min="80" max="130" step="5" value="100" />
       </div>
       <div class="field">
-        <label>Offline Whisper (~40 MB, cached after first download)</label>
-        <button class="btn btn-secondary" id="preloadModelsBtn">Preload Whisper</button>
+        <label>Offline pack</label>
+        <button class="btn btn-secondary" id="openPackBtn">Open Offline Ready</button>
       </div>
       <div class="row" style="padding:0;margin-top:12px">
         <button class="btn btn-secondary" id="exportBackupBtn">Export backup</button>
@@ -112,20 +134,40 @@
     </div>
   </div>
 
+  <div class="modal" id="packModal">
+    <div class="modal-box">
+      <h2>Offline Ready</h2>
+      <p class="sub">Download Whisper and the studio voices once. After that, record, transcribe, separate speakers, and speak notes with no network.</p>
+      <ul class="pack-list">
+        <li><div><strong>On-device storage</strong><span>Keeps models and notes if the browser would otherwise evict them</span></div><em id="packPersist">Needed</em></li>
+        <li><div><strong>Whisper tiny</strong><span id="packWhisperHint">~40 MB, transcription without a server</span></div><em id="packWhisper">Needed</em></li>
+        <li><div><strong>Studio voices</strong><span id="packTtsHint">Ten named voices for multi-person speech</span></div><em id="packTts">Needed</em></li>
+        <li><div><strong>App shell cached</strong><span>Workers and pages stored in this browser</span></div><em id="packCache">Needed</em></li>
+      </ul>
+      <div class="meter hidden" id="packMeter"><div id="packMeterBar"></div></div>
+      <p class="hint">Live captions still need a connection. Everything else runs on this device.</p>
+      <div class="row" style="padding:12px 0 0;justify-content:space-between">
+        <span class="muted" id="packOnline">Online now</span>
+        <button class="btn" id="downloadPackBtn">Download pack</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="shortcutsModal">
     <div class="modal-box" style="max-width:24rem">
       <h2>Shortcuts</h2>
       <p class="sub">Skip the mouse when you are mid-thought.</p>
-      <table style="width:100%;font-size:0.875rem;border-collapse:collapse">
-        <tr><td class="muted" style="padding:8px 0">Start / stop recording</td><td style="text-align:right"><kbd>Space</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Pause</td><td style="text-align:right"><kbd>P</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">New note</td><td style="text-align:right"><kbd>N</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Command palette</td><td style="text-align:right"><kbd>⌘ K</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Copy transcript</td><td style="text-align:right"><kbd>⌘ ⇧ C</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Summarize</td><td style="text-align:right"><kbd>⌘ ⇧ M</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Speak</td><td style="text-align:right"><kbd>⌘ ⇧ S</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Theme</td><td style="text-align:right"><kbd>⌘ ⇧ T</kbd></td></tr>
-        <tr><td class="muted" style="padding:8px 0">Settings</td><td style="text-align:right"><kbd>⌘ ,</kbd></td></tr>
+      <table class="keys">
+        <tr><td class="muted">Start / stop recording</td><td><kbd>Space</kbd></td></tr>
+        <tr><td class="muted">Pause</td><td><kbd>P</kbd></td></tr>
+        <tr><td class="muted">New note</td><td><kbd>N</kbd></td></tr>
+        <tr><td class="muted">Command palette</td><td><kbd>⌘ K</kbd></td></tr>
+        <tr><td class="muted">Copy transcript</td><td><kbd>⌘ ⇧ C</kbd></td></tr>
+        <tr><td class="muted">Summarize</td><td><kbd>⌘ ⇧ M</kbd></td></tr>
+        <tr><td class="muted">Speak</td><td><kbd>⌘ ⇧ S</kbd></td></tr>
+        <tr><td class="muted">Offline Ready</td><td><kbd>⌘ ⇧ O</kbd></td></tr>
+        <tr><td class="muted">Theme</td><td><kbd>⌘ ⇧ T</kbd></td></tr>
+        <tr><td class="muted">Settings</td><td><kbd>⌘ ,</kbd></td></tr>
       </table>
     </div>
   </div>
@@ -140,6 +182,6 @@
   <input type="file" id="audioFile" accept="audio/*" multiple hidden />
   <div class="toast-wrap" id="toastContainer"></div>
 
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>
