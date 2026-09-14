@@ -296,7 +296,7 @@ export function seedLibrary() {
     { id: "folder_meetings", name: "Meetings", createdAt: now },
     { id: "folder_ideas", name: "Ideas", createdAt: now },
   ];
-  const alex = { id: "sp_alex", name: "Alex", color: "#d4785a", voiceId: "am_adam" };
+  const alex = { id: "sp_alex", name: "Alex", color: "#d4785a", voiceId: "am_fenrir" };
   const maya = { id: "sp_maya", name: "Maya", color: "#5b8f8a", voiceId: "af_bella" };
   const notes = [
     {

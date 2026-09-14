@@ -15,8 +15,9 @@ The capture surface is a **studio**, not a stack of cards.
 - Whisper tiny for high-accuracy offline transcription
 - Live captions via Web Speech when the browser supports them
 - **Speaker diarization** — split a take into named turns, or parse `Name:` lines
-- **Multi-person speech** — each speaker keeps a studio voice; Play dialogue / export WAV
-- **Offline Ready** — one tap caches Whisper, ten studio voices, and the app shell
+- **Write a conversation** — Start, type, Enter. Up to four people. Play dialogue.
+- **Natural multi-person speech** — Kokoro on-device (Heart / Fenrir). Next line generates while this one plays.
+- **Offline Ready** — one tap caches Whisper, Kokoro studio voices, and the app shell
 - Command palette (`⌘K`), backup / restore, spoken punctuation
 - Mobile recorder chrome (library / record / note)
 - Existing `voiceNotesDB` history is imported automatically
@@ -26,7 +27,7 @@ The capture surface is a **studio**, not a stack of cards.
 Tap **Offline Ready** once while on Wi-Fi. That downloads:
 
 - Whisper tiny (~40 MB) for transcription with the radio off
-- Studio voices (Kokoro, with MMS English as fallback) for multi-person speech
+- Kokoro studio voices (WebGPU when available) for natural multi-person speech
 - The app shell and workers into the service worker cache
 - Persistent storage so the browser is less likely to evict the pack
 
@@ -43,7 +44,7 @@ Audio, transcripts, and summaries stay in this origin’s IndexedDB. There is no
 | Live captions (Web Speech) | No | Fast streaming captions on Chromium |
 | Whisper tiny (Transformers.js) | Yes, after Offline Ready | File + recording transcription |
 | Speaker diarization | Yes | On-device clustering from the recording |
-| Studio voices | Yes, after Offline Ready | Multi-person neural speech + WAV |
+| Studio voices | Yes, after Offline Ready | Kokoro neural speech + WAV. System speech is the fallback. |
 | System speech | Yes | Fallback read-aloud |
 | Extractive summary | Always | Instant, no model |
 

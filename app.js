@@ -7,9 +7,11 @@ import {
 import transcriptionQueue from "./engines/transcription-queue.js";
 import { diarizeBlob, dialogueText, parseLabeledTranscript } from "./engines/diarize.js";
 import {
-  STUDIO_VOICES, speakText, speakTurns, stopSpeaking, preloadNeuralTts,
-  generateNeuralSpeech, ttsSupported,
+  STUDIO_VOICES, CONVO_VOICE_CYCLE, CONVO_NAMES, speakText, speakTurns, stopSpeaking,
+  preloadNeuralTts, generateNeuralSpeech, playNeuralTurns, ttsSupported, resolveStudioVoice,
 } from "./engines/tts.js";
+
+const SPEAKER_COLORS = ["#d4785a", "#5b8f8a", "#c9a15b", "#7a8aa8"];
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -28,6 +30,8 @@ const state = {
   ttsReady: false,
   whisperReady: false,
   tab: "note",
+  pane: "text",
+  convoWho: "",
   settings: {
     theme: getStoredTheme(),
     fontScale: localStorage.getItem("vn:fontScale") || localStorage.getItem("vn-fontsize") || "100",
@@ -51,7 +55,13 @@ function speechCtor() {
 }
 
 function withSpeakers(n) {
-  return { ...n, speakers: n.speakers || [], speakerTurns: n.speakerTurns || [], timedWords: n.timedWords || [], tags: n.tags || [] };
+  return {
+    ...n,
+    speakers: (n.speakers || []).map((s) => ({ ...s, voiceId: resolveStudioVoice(s.voiceId) })),
+    speakerTurns: n.speakerTurns || [],
+    timedWords: n.timedWords || [],
+    tags: n.tags || [],
+  };
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -175,6 +185,71 @@ function render() {
   renderEditor();
 }
 
+function pairSpeakers() {
+  return CONVO_NAMES.slice(0, 2).map((name, i) => ({
+    id: uid("sp"),
+    name,
+    color: SPEAKER_COLORS[i],
+    voiceId: CONVO_VOICE_CYCLE[i],
+  }));
+}
+
+function conversationHtml(note) {
+  const speakers = note.speakers || [];
+  const turns = note.speakerTurns || [];
+  if (!speakers.length) {
+    const canSplit = note.audioId || (note.transcript || "").trim();
+    return `<div class="convo-empty">
+      <p class="convo-title">Write a conversation</p>
+      <p class="muted">Two people, then type. Enter adds the line and hands the floor to the other person.</p>
+      <div class="row" style="justify-content:center;padding-top:16px">
+        <button class="btn" id="startConvoBtn">Start</button>
+        ${canSplit ? `<button class="btn btn-secondary" id="diarizeBtn">Split this take</button>` : ""}
+      </div>
+    </div>`;
+  }
+  const who = speakers.some((s) => s.id === state.convoWho) ? state.convoWho : speakers[0].id;
+  state.convoWho = who;
+  const active = speakers.find((s) => s.id === who) || speakers[0];
+  const chips = speakers.map((s) => `
+    <div class="convo-chip ${s.id === who ? "selected" : ""}">
+      <button type="button" class="dot" style="background:${s.color}" data-pick="${s.id}" aria-label="Speak as ${escAttr(s.name)}"></button>
+      <input value="${escAttr(s.name)}" data-rename="${s.id}" aria-label="Name" />
+      <select data-voice="${s.id}">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === s.voiceId ? "selected" : ""}>${v.name}</option>`).join("")}</select>
+      ${speakers.length > 1 ? `<button type="button" class="convo-x" data-rmsp="${s.id}" aria-label="Remove ${escAttr(s.name)}">×</button>` : ""}
+    </div>`).join("");
+  const bubbles = turns.length
+    ? `<ol class="convo-list">${turns.map((t, i) => {
+        const sp = speakers.find((s) => s.id === t.speakerId);
+        const them = speakers.findIndex((s) => s.id === sp?.id) % 2 === 1;
+        return `<li class="convo-row ${them ? "them" : "mine"}">
+          <div class="convo-bubble ${state.speakingTurn === i ? "active" : ""}" style="border-left-color:${sp?.color || "var(--border)"}">
+            <header><span style="color:${sp?.color || "inherit"}">${esc(sp?.name || "Speaker")}</span>
+              <button type="button" class="convo-x" data-rmturn="${i}" aria-label="Remove line">×</button></header>
+            <textarea data-turn="${i}" rows="1">${esc(t.text)}</textarea>
+          </div>
+        </li>`;
+      }).join("")}</ol>`
+    : `<p class="muted">Type a line as ${esc(active.name)}. Enter sends it. The other person answers next.</p>`;
+  return `<div class="convo-pad">
+    <div class="convo-people">
+      ${chips}
+      ${speakers.length < 4 ? `<button type="button" class="convo-add" id="addPersonBtn">+ Person</button>` : ""}
+      <div class="convo-play-wrap">
+        ${note.audioId ? `<button class="btn btn-ghost btn-sm" id="diarizeBtn">From recording</button>` : ""}
+        <button class="btn btn-sm ${state.speakingTurn >= 0 ? "btn-record" : "btn-secondary"}" id="convoPlay" ${turns.length ? "" : "disabled"}>${state.speakingTurn >= 0 ? "Stop" : "Play"}</button>
+      </div>
+    </div>
+    ${bubbles}
+    <form class="convo-compose" id="convoForm">
+      <span class="dot" style="background:${active.color}"></span>
+      <input id="convoDraft" placeholder="Say as ${escAttr(active.name)}" aria-label="Line as ${escAttr(active.name)}" autocomplete="off" />
+      <button class="btn btn-sm" type="submit">Enter</button>
+    </form>
+    ${state.ttsReady ? "" : `<button type="button" class="pack-hint" id="needPack2">Natural voices after Offline Ready — Heart and Fenrir, not the system robot.</button>`}
+  </div>`;
+}
+
 function renderEditor() {
   const note = state.notes.find((n) => n.id === state.selectedId);
   const root = $("editorRoot");
@@ -182,17 +257,18 @@ function renderEditor() {
     root.innerHTML = `<div class="empty-studio"><div class="empty-card">
       <p class="section-label" style="justify-content:center;padding:0">Studio</p>
       <h2>Ready when you are</h2>
-      <p>Hold the room. Record, drop a file, or start a blank note. Nothing leaves this device.</p>
+      <p>Hold the room. Record, drop a file, or write a conversation. Nothing leaves this device.</p>
       <button class="rec-btn" id="heroRec" aria-label="Start recording">●</button>
       <div class="timer">${formatDuration(state.recMs)}</div>
       <div class="hint">Press Space to record</div>
+      <button class="btn btn-secondary" id="emptyConvoBtn" style="margin-top:20px">Write a conversation</button>
     </div></div>`;
     $("heroRec")?.addEventListener("click", () => toggleRec());
+    $("emptyConvoBtn")?.addEventListener("click", () => startConversation());
     return;
   }
   const live = state.rec !== "idle" && recNoteId === note.id;
   const speakers = note.speakers || [];
-  const turns = note.speakerTurns || [];
   root.innerHTML = `<article class="editor">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
       <input class="editor-title" id="titleInput" value="${escAttr(note.title)}" aria-label="Note title" />
@@ -216,39 +292,23 @@ function renderEditor() {
     </div>` : ""}
     ${note.audioId && !live ? `<div class="audio-bar" id="audioBar"></div>` : ""}
     <div class="listen-bar">
-      <button class="btn btn-sm ${state.speakingTurn >= 0 ? "btn-record" : "btn-secondary"}" id="listenBtn">${speakers.length > 1 ? "Play dialogue" : "Listen"}</button>
+      <button class="btn btn-sm ${state.speakingTurn >= 0 ? "btn-record" : "btn-secondary"}" id="listenBtn">${state.speakingTurn >= 0 ? "Stop" : speakers.length > 1 ? "Play dialogue" : "Listen"}</button>
       <button class="btn btn-ghost btn-sm" id="wavBtn">WAV</button>
-      <select id="voiceSelect">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === state.settings.ttsVoiceId ? "selected" : ""}>${v.name} · ${v.hint}</option>`).join("")}</select>
+      ${speakers.length <= 1 ? `<select id="voiceSelect">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === state.settings.ttsVoiceId ? "selected" : ""}>${v.name} · ${v.hint}</option>`).join("")}</select>` : ""}
       ${state.ttsReady ? "" : `<button class="btn btn-ghost btn-sm" id="needPack">Neural voices need Offline Ready</button>`}
     </div>
     <div class="tags" id="noteTags">${(note.tags || []).map((t) => `<button class="chip" data-rmtag="${esc(t)}">${esc(t)} ×</button>`).join("")}
       <input id="tagDraft" placeholder="Add tag" style="border:0;background:transparent;color:inherit;width:7rem;font-size:12px;outline:none" />
     </div>
     <div class="tabs">
-      <button class="active" data-pane="text">Transcript</button>
-      <button data-pane="speakers">Speakers${speakers.length ? ` · ${speakers.length}` : ""}</button>
+      <button class="${state.pane !== "conversation" ? "active" : ""}" data-pane="text">Transcript</button>
+      <button class="${state.pane === "conversation" ? "active" : ""}" data-pane="conversation">Conversation${speakers.length ? ` · ${speakers.length}` : ""}</button>
     </div>
-    <div id="pane-text">
+    <div id="pane-text" class="${state.pane === "conversation" ? "hidden" : ""}">
       <textarea class="transcript" id="transcript">${esc(note.transcript)}</textarea>
     </div>
-    <div id="pane-speakers" class="hidden">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:12px">
-        <p class="muted" style="font-size:0.875rem">${speakers.length ? "Rename anyone. Each speaker keeps a studio voice for playback." : "Separate overlapping voices, or write turns as “Name: …”."}</p>
-        <button class="btn btn-secondary btn-sm" id="diarizeBtn">${speakers.length ? "Re-identify" : "Identify speakers"}</button>
-      </div>
-      ${speakers.length ? `<div class="speaker-grid">${speakers.map((s) => `
-        <div class="speaker-card" data-sp="${s.id}">
-          <span class="dot" style="background:${s.color}"></span>
-          <input value="${escAttr(s.name)}" data-rename="${s.id}" aria-label="Speaker name" />
-          <select data-voice="${s.id}">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === s.voiceId ? "selected" : ""}>${v.name}</option>`).join("")}</select>
-        </div>`).join("")}</div>` : ""}
-      ${turns.length ? `<ol style="list-style:none;margin-top:16px">${turns.map((t, i) => {
-        const sp = speakers.find((s) => s.id === t.speakerId);
-        return `<li class="turn ${state.speakingTurn === i ? "active" : ""}" style="border-left-color:${sp?.color || "var(--border-strong)"}">
-          <header><span style="color:${sp?.color || "inherit"}">${esc(sp?.name || "Speaker")}</span><span class="muted">${formatDuration(t.start * 1000)}</span></header>
-          <p>${esc(t.text || "—")}</p>
-        </li>`;
-      }).join("")}</ol>` : `<p class="muted" style="border:1px dashed var(--border);border-radius:12px;padding:24px;text-align:center">${note.audioId ? "Identify speakers to split this take into a conversation." : "Label lines with a name and a colon, then identify speakers."}</p>`}
+    <div id="pane-conversation" class="${state.pane === "conversation" ? "" : "hidden"}">
+      ${conversationHtml(note)}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
       <span class="section-label" style="padding:0">Summary</span>
@@ -273,6 +333,18 @@ function renderEditor() {
   $("needPack")?.addEventListener("click", () => $("packModal").classList.add("open"));
   $("voiceSelect")?.addEventListener("change", (e) => { state.settings.ttsVoiceId = e.target.value; });
   $("diarizeBtn")?.addEventListener("click", () => diarizeNote(note.id));
+  $("startConvoBtn")?.addEventListener("click", () => startConversation(note.id));
+  $("addPersonBtn")?.addEventListener("click", () => addSpeaker(note.id));
+  $("convoPlay")?.addEventListener("click", () => (state.speakingTurn >= 0 ? stopSpeakAudio() : speakNote(note)));
+  $("needPack2")?.addEventListener("click", () => $("packModal").classList.add("open"));
+  $("convoForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const draft = $("convoDraft");
+    const line = draft?.value.trim();
+    if (!line) return;
+    const who = state.convoWho || note.speakers[0]?.id;
+    if (who) void addTurn(note.id, who, line);
+  });
   $("delBtn")?.addEventListener("click", async () => {
     if (!confirm("Delete this note?")) return;
     await deleteNote(note.id);
@@ -301,12 +373,23 @@ function renderEditor() {
     patch(note.id, { speakers });
   }));
   root.querySelectorAll("[data-pane]").forEach((b) => b.addEventListener("click", () => {
+    state.pane = b.dataset.pane;
     root.querySelectorAll("[data-pane]").forEach((x) => x.classList.toggle("active", x === b));
-    $("pane-text").classList.toggle("hidden", b.dataset.pane !== "text");
-    $("pane-speakers").classList.toggle("hidden", b.dataset.pane !== "speakers");
+    $("pane-text")?.classList.toggle("hidden", state.pane !== "text");
+    $("pane-conversation")?.classList.toggle("hidden", state.pane !== "conversation");
+    if (state.pane === "conversation") requestAnimationFrame(() => $("convoDraft")?.focus());
   }));
+  root.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => {
+    state.convoWho = b.dataset.pick;
+    render();
+    requestAnimationFrame(() => $("convoDraft")?.focus());
+  }));
+  root.querySelectorAll("[data-rmsp]").forEach((b) => b.addEventListener("click", () => removeSpeaker(note.id, b.dataset.rmsp)));
+  root.querySelectorAll("[data-rmturn]").forEach((b) => b.addEventListener("click", () => removeTurn(note.id, Number(b.dataset.rmturn))));
+  root.querySelectorAll("[data-turn]").forEach((ta) => ta.addEventListener("change", (e) => updateTurn(note.id, Number(e.target.dataset.turn), e.target.value)));
   $("heroRec")?.addEventListener("click", () => toggleRec());
   if (note.audioId) mountAudio(note.audioId);
+  if (state.pane === "conversation") requestAnimationFrame(() => $("convoDraft")?.focus());
 }
 
 async function mountAudio(id) {
@@ -318,7 +401,17 @@ async function mountAudio(id) {
 }
 
 async function patch(id, p) {
-  state.notes = state.notes.map((n) => n.id === id ? withSpeakers({ ...n, ...p, updatedAt: Date.now() }) : n);
+  const current = state.notes.find((n) => n.id === id);
+  if (!current) return;
+  let next = p;
+  if (p.transcript && !p.speakers && !p.speakerTurns && !(current.speakers || []).length) {
+    const labeled = parseLabeledTranscript(p.transcript);
+    if (labeled && labeled.speakers.length >= 2) {
+      next = { ...p, speakers: labeled.speakers, speakerTurns: labeled.turns };
+      state.pane = "conversation";
+    }
+  }
+  state.notes = state.notes.map((n) => n.id === id ? withSpeakers({ ...n, ...next, updatedAt: Date.now() }) : n);
   const n = state.notes.find((x) => x.id === id);
   if (n) await saveNote(n);
   render();
@@ -347,6 +440,93 @@ async function doSummary(id) {
   showToast("Summary ready");
 }
 
+async function startConversation(noteId) {
+  const speakers = pairSpeakers();
+  state.pane = "conversation";
+  state.convoWho = speakers[0].id;
+  state.tab = "note";
+  if (noteId) {
+    const note = state.notes.find((n) => n.id === noteId);
+    if (note && !(note.speakers || []).length) {
+      const title = note.title === "Untitled note" || note.title === "Recording" ? "Conversation" : note.title;
+      await patch(noteId, {
+        speakers,
+        speakerTurns: [],
+        title,
+        tags: (note.tags || []).includes("conversation") ? note.tags : [...(note.tags || []), "conversation"],
+      });
+      return;
+    }
+    if (note) {
+      state.selectedId = noteId;
+      render();
+      return;
+    }
+  }
+  await createNote({
+    title: "Conversation",
+    speakers,
+    speakerTurns: [],
+    tags: ["conversation"],
+  });
+}
+
+async function addSpeaker(noteId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || (note.speakers || []).length >= 4) return;
+  const i = note.speakers.length;
+  const speaker = {
+    id: uid("sp"),
+    name: CONVO_NAMES[i] || `Speaker ${i + 1}`,
+    color: SPEAKER_COLORS[i % SPEAKER_COLORS.length],
+    voiceId: CONVO_VOICE_CYCLE[i % CONVO_VOICE_CYCLE.length],
+  };
+  await patch(noteId, { speakers: [...note.speakers, speaker] });
+}
+
+async function removeSpeaker(noteId, speakerId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || note.speakers.length <= 1) return;
+  const speakers = note.speakers.filter((s) => s.id !== speakerId);
+  const fallback = speakers[0].id;
+  const speakerTurns = note.speakerTurns.map((t) => t.speakerId === speakerId ? { ...t, speakerId: fallback } : t);
+  if (state.convoWho === speakerId) state.convoWho = fallback;
+  await patch(noteId, { speakers, speakerTurns, transcript: dialogueText(speakers, speakerTurns) });
+}
+
+async function addTurn(noteId, speakerId, text) {
+  const note = state.notes.find((n) => n.id === noteId);
+  const line = text.trim();
+  if (!note || !line) return;
+  const last = note.speakerTurns[note.speakerTurns.length - 1];
+  const start = last ? last.end + 0.45 : 0;
+  const dur = Math.max(1.1, line.split(/\s+/).length * 0.36);
+  const speakerTurns = [...note.speakerTurns, { speakerId, start, end: start + dur, text: line }];
+  const idx = Math.max(0, note.speakers.findIndex((s) => s.id === speakerId));
+  state.convoWho = note.speakers[(idx + 1) % note.speakers.length]?.id || speakerId;
+  const title = note.title === "Conversation" || note.title === "Untitled note" ? titleFromTranscript(line) : note.title;
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns), title });
+  requestAnimationFrame(() => $("convoDraft")?.focus());
+}
+
+async function updateTurn(noteId, index, text) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || !note.speakerTurns[index]) return;
+  const speakerTurns = note.speakerTurns.map((t, i) => i === index ? { ...t, text } : t);
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns) });
+}
+
+async function removeTurn(noteId, index) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  const speakerTurns = note.speakerTurns.filter((_, i) => i !== index);
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns) });
+}
+
+function highlightTurn(i) {
+  document.querySelectorAll(".convo-bubble").forEach((el, idx) => el.classList.toggle("active", idx === i));
+}
+
 async function diarizeNote(id) {
   const note = state.notes.find((n) => n.id === id);
   if (!note) return;
@@ -359,11 +539,13 @@ async function diarizeNote(id) {
       const transcript = result.turns.some((t) => t.text) && result.speakers.length > 1
         ? dialogueText(result.speakers, result.turns)
         : note.transcript;
+      state.pane = "conversation";
       await patch(id, { speakers: result.speakers, speakerTurns: result.turns, timedWords: result.timedWords.length ? result.timedWords : note.timedWords, transcript });
       showToast(result.speakers.length > 1 ? `Separated ${result.speakers.length} speakers` : "One speaker throughout");
     } else if (note.transcript) {
       const labeled = parseLabeledTranscript(note.transcript);
       if (!labeled) { showToast("Need a recording, or label turns like “Alex: …”"); return; }
+      state.pane = "conversation";
       await patch(id, { speakers: labeled.speakers, speakerTurns: labeled.turns });
       showToast(`Found ${labeled.speakers.length} speakers in the transcript`);
     } else showToast("Record or drop audio first");
@@ -380,34 +562,70 @@ function stopSpeakAudio() {
     speakAudio = null;
   }
   state.speakingTurn = -1;
+  highlightTurn(-1);
+  const listen = $("listenBtn");
+  const play = $("convoPlay");
+  if (listen) {
+    const n = state.notes.find((x) => x.id === state.selectedId);
+    listen.textContent = (n?.speakers || []).length > 1 ? "Play dialogue" : "Listen";
+    listen.classList.remove("btn-record");
+    listen.classList.add("btn-secondary");
+  }
+  if (play) {
+    play.textContent = "Play";
+    play.classList.remove("btn-record");
+    play.classList.add("btn-secondary");
+    play.disabled = !(state.notes.find((x) => x.id === state.selectedId)?.speakerTurns || []).length;
+  }
 }
 
 async function speakNote(note) {
+  if (state.speakingTurn >= 0) {
+    stopSpeakAudio();
+    return;
+  }
   const sel = window.getSelection()?.toString().trim();
   const byId = new Map((note.speakers || []).map((s) => [s.id, s]));
-  const turns = !sel && note.speakerTurns?.length > 1
-    ? note.speakerTurns.map((t) => ({ text: t.text, voiceId: byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId }))
-    : [{ text: sel || note.transcript.trim(), voiceId: state.settings.ttsVoiceId }];
+  const turns = !sel && (note.speakerTurns || []).length > 0
+    ? note.speakerTurns.filter((t) => t.text.trim()).map((t) => ({
+        text: t.text,
+        voiceId: resolveStudioVoice(byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId),
+      }))
+    : [{ text: sel || note.transcript.trim(), voiceId: resolveStudioVoice(state.settings.ttsVoiceId) }];
   if (!turns.some((t) => t.text.trim())) { showToast("Nothing to speak"); return; }
   stopSpeakAudio();
   state.speakingTurn = 0;
-  render();
+  const listen = $("listenBtn");
+  const play = $("convoPlay");
+  if (listen) { listen.textContent = "Stop"; listen.classList.add("btn-record"); }
+  if (play) { play.textContent = "Stop"; play.disabled = false; play.classList.add("btn-record"); }
   try {
     if (state.ttsReady && !sel) {
-      showToast("Rendering studio voices…");
-      const blob = await generateNeuralSpeech(turns, { speed: state.settings.ttsRate });
-      const url = URL.createObjectURL(blob);
-      speakAudio = new Audio(url);
-      speakAudio.onended = () => { state.speakingTurn = -1; render(); };
-      await speakAudio.play();
-      return;
+      try {
+        await playNeuralTurns(turns, {
+          speed: state.settings.ttsRate,
+          onTurn: (i) => { state.speakingTurn = i; highlightTurn(i); },
+        });
+        return;
+      } catch (err) {
+        if (err.message === "canceled") return;
+        showToast("Studio voices unavailable — using system speech");
+      }
+    } else if (!state.ttsReady && turns.length > 1) {
+      showToast("Using system voices. Offline Ready loads the natural studio pack.");
     }
     if (!ttsSupported()) { showToast("Speech is not available"); return; }
-    await speakTurns(turns, { rate: state.settings.ttsRate, onTurn: (i) => { state.speakingTurn = i; } });
+    await speakTurns(turns, { rate: state.settings.ttsRate, onTurn: (i) => { state.speakingTurn = i; highlightTurn(i); } });
   } catch (err) {
+    if (err.message === "canceled") return;
+    if (["synthesis-failed", "audio-busy", "not-allowed"].includes(err.message)) {
+      $("packModal").classList.add("open");
+      showToast("System speech failed. Offline Ready loads the natural studio voices.");
+      return;
+    }
     showToast(err.message || "Could not speak");
   } finally {
-    if (!speakAudio) { state.speakingTurn = -1; render(); }
+    if (!speakAudio) { state.speakingTurn = -1; highlightTurn(-1); stopSpeakAudio(); }
   }
 }
 
@@ -417,8 +635,11 @@ async function downloadSpeech(note) {
   try {
     const byId = new Map((note.speakers || []).map((s) => [s.id, s]));
     const turns = note.speakerTurns?.length
-      ? note.speakerTurns.map((t) => ({ text: t.text, voiceId: byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId }))
-      : [{ text: note.transcript, voiceId: state.settings.ttsVoiceId }];
+      ? note.speakerTurns.map((t) => ({
+          text: t.text,
+          voiceId: resolveStudioVoice(byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId),
+        }))
+      : [{ text: note.transcript, voiceId: resolveStudioVoice(state.settings.ttsVoiceId) }];
     const blob = await generateNeuralSpeech(turns, { speed: state.settings.ttsRate });
     downloadFile(`${(note.title || "voice").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.wav`, blob, "audio/wav");
     showToast("Speech saved as WAV");
@@ -440,7 +661,7 @@ async function prepareOffline() {
       setPackRow("packPersist", ok);
     }
     if ("caches" in window) {
-      const cache = await caches.open("voice-notes-v13");
+      const cache = await caches.open("voice-notes-v14");
       await Promise.all([
         "./", "./index.html", "./app.js", "./app-utils.js", "./style.css",
         "./engines/tts-worker.js", "./engines/whisper-worker.js", "./engines/diarize.js", "./engines/tts.js",
@@ -503,6 +724,7 @@ function typing(el) {
 
 function wire() {
   $("newNoteBtn").onclick = () => createNote();
+  $("newConvoBtn").onclick = () => startConversation();
   $("search").oninput = (e) => { state.query = e.target.value; render(); };
   document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { state.filter = b.dataset.filter; document.querySelectorAll("[data-filter]").forEach((x) => x.classList.toggle("active", x === b)); render(); });
   $("folderList").onclick = (e) => {
@@ -520,7 +742,14 @@ function wire() {
   };
   $("noteList").onclick = (e) => {
     const b = e.target.closest("[data-id]");
-    if (b) { state.selectedId = b.dataset.id; state.tab = "note"; $("sidebar").classList.remove("open"); render(); }
+    if (b) {
+      state.selectedId = b.dataset.id;
+      const n = state.notes.find((x) => x.id === b.dataset.id);
+      state.pane = (n?.speakers || []).length ? "conversation" : "text";
+      state.tab = "note";
+      $("sidebar").classList.remove("open");
+      render();
+    }
   };
   $("addFolderBtn").onclick = async () => {
     const name = prompt("Notebook name");
@@ -620,6 +849,7 @@ function openCommand() {
     const q = input.value.toLowerCase();
     const actions = [
       { label: "New note", run: () => createNote() },
+      { label: "New conversation", run: () => startConversation() },
       { label: "Start recording", run: () => startRec() },
       { label: "Offline Ready", run: () => $("packModal").classList.add("open") },
       { label: "Identify speakers", run: () => state.selectedId && diarizeNote(state.selectedId) },

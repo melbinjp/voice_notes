@@ -235,6 +235,62 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.03em; text-wra
 .turn.active { outline: 1px solid var(--border-strong); }
 .turn header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
 
+.convo-empty {
+  border: 1px dashed var(--border); background: var(--surface);
+  border-radius: var(--radius-lg); padding: 32px 16px; text-align: center;
+}
+.convo-title { font-family: var(--font-display); font-size: 1.35rem; margin-bottom: 8px; }
+.convo-people { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.convo-chip {
+  display: flex; align-items: center; gap: 8px; height: 44px;
+  border: 1px solid var(--border); background: var(--surface);
+  border-radius: 999px; padding: 0 10px;
+}
+.convo-chip.selected { border-color: var(--border-strong); background: var(--elevated); }
+.convo-chip input {
+  width: 4.8rem; border: 0; background: transparent; color: var(--fg); outline: none; font-size: 0.875rem;
+}
+.convo-chip select {
+  height: 32px; max-width: 6.5rem; border: 0; background: transparent; color: var(--muted); font-size: 12px;
+}
+.convo-x {
+  border: 0; background: transparent; color: var(--subtle); font-size: 16px; line-height: 1; padding: 4px;
+}
+.convo-x:hover { color: var(--record); }
+.convo-add {
+  height: 44px; border: 1px dashed var(--border); background: transparent; color: var(--muted);
+  border-radius: 999px; padding: 0 12px; font-size: 12px;
+}
+.convo-add:hover { color: var(--fg); }
+.convo-play-wrap { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.convo-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.convo-row { display: flex; }
+.convo-row.them { justify-content: flex-end; }
+.convo-bubble {
+  max-width: 85%; border: 1px solid var(--border); background: var(--surface);
+  border-radius: 16px; padding: 8px 12px; border-left-width: 3px;
+}
+.convo-row.them .convo-bubble { border-left-width: 1px; }
+.convo-bubble.active { border-color: var(--border-strong); background: var(--elevated); }
+.convo-bubble header { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 4px; }
+.convo-bubble textarea {
+  width: 100%; border: 0; background: transparent; color: var(--fg); outline: none;
+  resize: none; font: inherit; font-size: 0.875rem; line-height: 1.5;
+}
+.convo-compose {
+  display: flex; align-items: center; gap: 8px; margin-top: 16px;
+  border: 1px solid var(--border); background: var(--elevated);
+  border-radius: var(--radius-lg); padding: 8px 12px;
+}
+.convo-compose input {
+  flex: 1; min-width: 0; height: 44px; border: 0; background: transparent; color: var(--fg); outline: none; font-size: 0.875rem;
+}
+.pack-hint {
+  display: block; margin-top: 10px; border: 0; background: transparent; color: var(--subtle);
+  font-size: 11px; text-decoration: underline; text-underline-offset: 2px;
+}
+@media (min-width: 560px) { .convo-bubble { max-width: 72%; } }
+
 .modal {
   position: fixed; inset: 0; background: color-mix(in oklab, var(--bg) 70%, transparent);
   display: none; align-items: flex-start; justify-content: center; padding-top: 12vh; z-index: 50;

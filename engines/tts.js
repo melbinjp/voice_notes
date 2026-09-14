@@ -1,18 +1,67 @@
 export const STUDIO_VOICES = [
-  { id: "af_heart", name: "Heart", gender: "female", lang: "en-US", hint: "Warm, close" },
-  { id: "af_bella", name: "Bella", gender: "female", lang: "en-US", hint: "Clear" },
+  { id: "af_heart", name: "Heart", gender: "female", lang: "en-US", hint: "Warm, closest" },
+  { id: "af_bella", name: "Bella", gender: "female", lang: "en-US", hint: "Clear, bright" },
+  { id: "af_nicole", name: "Nicole", gender: "female", lang: "en-US", hint: "Soft, close-mic" },
   { id: "af_sarah", name: "Sarah", gender: "female", lang: "en-US", hint: "Measured" },
-  { id: "af_nicole", name: "Nicole", gender: "female", lang: "en-US", hint: "Soft" },
-  { id: "am_adam", name: "Adam", gender: "male", lang: "en-US", hint: "Even" },
-  { id: "am_michael", name: "Michael", gender: "male", lang: "en-US", hint: "Low" },
-  { id: "bf_emma", name: "Emma", gender: "female", lang: "en-GB", hint: "Bright" },
-  { id: "bf_isabella", name: "Isabella", gender: "female", lang: "en-GB", hint: "Soft" },
-  { id: "bm_george", name: "George", gender: "male", lang: "en-GB", hint: "Round" },
-  { id: "bm_lewis", name: "Lewis", gender: "male", lang: "en-GB", hint: "Dry" },
+  { id: "am_fenrir", name: "Fenrir", gender: "male", lang: "en-US", hint: "Low, natural" },
+  { id: "am_michael", name: "Michael", gender: "male", lang: "en-US", hint: "Even baritone" },
+  { id: "am_puck", name: "Puck", gender: "male", lang: "en-US", hint: "Light, quick" },
+  { id: "bf_emma", name: "Emma", gender: "female", lang: "en-GB", hint: "Bright UK" },
+  { id: "bm_george", name: "George", gender: "male", lang: "en-GB", hint: "Round UK" },
+  { id: "bm_fable", name: "Fable", gender: "male", lang: "en-GB", hint: "Soft UK" },
 ];
 
-const FEMALE = /female|woman|samantha|victoria|karen|moira|zira|susan|fiona|tessa|veena|heera|serena|kate/i;
-const MALE = /male|man|daniel|david|alex(?!a)|fred|tom|rishi|google uk english male|microsoft david|microsoft mark|microsoft george/i;
+export const CONVO_VOICE_CYCLE = ["am_fenrir", "af_heart", "am_michael", "af_bella"];
+export const CONVO_NAMES = ["Alex", "Maya", "Sam", "Jordan"];
+
+const VOICE_PACE = {
+  af_heart: 0.94,
+  af_bella: 0.96,
+  af_nicole: 0.93,
+  af_sarah: 0.95,
+  am_fenrir: 0.91,
+  am_michael: 0.93,
+  am_puck: 0.97,
+  am_adam: 0.91,
+  bf_emma: 0.96,
+  bm_george: 0.92,
+  bm_fable: 0.94,
+  bm_lewis: 0.94,
+};
+
+const BACKCHANNEL =
+  /^(yeah|yep|yup|yes|no|nah|ok|okay|right|sure|mm+|uh-huh|got it|thanks|hey|hi|oh|ah|huh)\b/i;
+
+const FEMALE =
+  /female|woman|samantha|victoria|karen|moira|zira|susan|fiona|tessa|veena|heera|serena|kate|siri|google us english/i;
+const MALE =
+  /male|man|daniel|david|alex(?!a)|fred|tom|rishi|google uk english male|microsoft david|microsoft mark|microsoft george/i;
+
+export function resolveStudioVoice(id) {
+  const legacy = {
+    am_adam: "am_fenrir",
+    bm_lewis: "bm_fable",
+    bf_isabella: "bf_emma",
+    af_isabella: "bf_emma",
+  };
+  return legacy[id] || id;
+}
+
+export function naturalSpeed(voiceId, userRate = 1, turnIndex = 0) {
+  const base = VOICE_PACE[resolveStudioVoice(voiceId)] ?? 0.95;
+  const jitter = 1 + ((turnIndex * 7) % 5 - 2) * 0.008;
+  return Math.min(1.22, Math.max(0.72, base * userRate * jitter));
+}
+
+export function conversationalGap(prev, next, speakerChanged) {
+  const p = String(prev || "").trim();
+  const n = String(next || "").trim();
+  if (speakerChanged && BACKCHANNEL.test(n)) return 0.11;
+  if (/\?["']?$/.test(p)) return speakerChanged ? 0.48 : 0.22;
+  if (/!["']?$/.test(p)) return speakerChanged ? 0.32 : 0.15;
+  if (speakerChanged) return 0.34;
+  return 0.12;
+}
 
 export function ttsSupported() {
   return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -22,24 +71,31 @@ function listVoices() {
   return ttsSupported() ? window.speechSynthesis.getVoices() : [];
 }
 
-export async function resolveSystemVoice(voiceId) {
-  const voices = listVoices();
-  if (!voices.length) {
-    await new Promise((resolve) => {
-      if (!ttsSupported()) return resolve();
-      window.speechSynthesis.addEventListener("voiceschanged", resolve, { once: true });
-      setTimeout(resolve, 700);
-    });
-  }
+async function waitForVoices() {
   const have = listVoices();
+  if (have.length) return have;
+  return new Promise((resolve) => {
+    const finish = () => resolve(listVoices());
+    if (!ttsSupported()) return finish();
+    window.speechSynthesis.addEventListener("voiceschanged", finish, { once: true });
+    setTimeout(finish, 700);
+  });
+}
+
+export async function resolveSystemVoice(voiceId) {
+  const voices = await waitForVoices();
+  if (!voices.length) return null;
   const spec = STUDIO_VOICES.find((v) => v.id === voiceId);
   const lang = spec?.lang || "en-US";
   const gender = spec?.gender || "female";
-  const langPool = have.filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
-  const pool = langPool.length ? langPool : have;
+  const langPool = voices.filter((v) => v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
+  const pool = langPool.length ? langPool : voices;
   const gendered = pool.filter((v) => (gender === "female" ? FEMALE.test(v.name) : MALE.test(v.name)));
   const named = pool.find((v) => spec && v.name.toLowerCase().includes(spec.name.toLowerCase()));
-  return named || gendered[0] || pool.find((v) => v.default) || pool[0] || null;
+  const premium = (gendered.length ? gendered : pool).find((v) =>
+    /premium|enhanced|neural|natural|samantha|daniel|karen|moira|rishi/i.test(v.name),
+  );
+  return named || premium || gendered[0] || pool.find((v) => v.default) || pool[0] || null;
 }
 
 export function speakText(text, opts = {}) {
@@ -48,16 +104,17 @@ export function speakText(text, opts = {}) {
       reject(new Error("Speech synthesis is not available in this browser."));
       return;
     }
-    window.speechSynthesis.cancel();
+    if (opts.cancel !== false) window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = opts.rate ?? 1;
+    u.rate = Math.min(1.15, Math.max(0.75, (opts.rate ?? 1) * 0.96));
+    u.pitch = 1;
     u.lang = opts.lang || "en-US";
-    const go = () => window.speechSynthesis.speak(u);
     u.onend = () => resolve();
     u.onerror = (e) => {
       if (e.error === "canceled" || e.error === "interrupted") resolve();
       else reject(new Error(e.error || "TTS error"));
     };
+    const go = () => window.speechSynthesis.speak(u);
     if (opts.voiceId) {
       resolveSystemVoice(opts.voiceId).then((v) => {
         if (v) {
@@ -72,6 +129,10 @@ export function speakText(text, opts = {}) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export async function speakTurns(turns, opts = {}) {
   if (!ttsSupported()) throw new Error("Speech synthesis is not available in this browser.");
   window.speechSynthesis.cancel();
@@ -79,16 +140,26 @@ export async function speakTurns(turns, opts = {}) {
     const turn = turns[i];
     if (!turn?.text.trim()) continue;
     opts.onTurn?.(i);
-    await speakText(turn.text, { rate: opts.rate, voiceId: turn.voiceId });
+    await speakText(turn.text, { rate: opts.rate, voiceId: turn.voiceId, cancel: false });
+    const next = turns[i + 1];
+    if (next) {
+      const gap = conversationalGap(turn.text, next.text, next.voiceId !== turn.voiceId);
+      await sleep(gap * 1000);
+    }
   }
 }
 
 export function stopSpeaking() {
   if (ttsSupported()) window.speechSynthesis.cancel();
+  neuralGen += 1;
+  stopNeuralPlayback();
 }
 
 let worker = null;
 let seq = 0;
+let neuralGen = 0;
+let playCtx = null;
+const playSources = [];
 const pending = new Map();
 
 function getWorker() {
@@ -143,7 +214,7 @@ function generateOne(text, voice, speed, onProgress) {
       if (p.status === "done" && p.audio) resolve({ audio: p.audio, sampleRate: p.sampleRate || 24000 });
       if (p.status === "error") reject(new Error(p.error || "TTS failed"));
     });
-    getWorker().postMessage({ action: "generate", id, text, voice, speed });
+    getWorker().postMessage({ action: "generate", id, text, voice: resolveStudioVoice(voice), speed });
   });
 }
 
@@ -190,17 +261,81 @@ export function encodeWav(samples, sampleRate) {
 }
 
 export async function generateNeuralSpeech(turns, opts = {}) {
+  const ticket = ++neuralGen;
   const chunks = [];
   let sampleRate = 24000;
   for (let i = 0; i < turns.length; i++) {
+    if (ticket !== neuralGen) throw new Error("canceled");
     const turn = turns[i];
     if (!turn?.text.trim()) continue;
     opts.onProgress?.({ status: "generating", current: i + 1, total: turns.length });
-    const part = await generateOne(turn.text, turn.voiceId, opts.speed ?? 1, opts.onProgress);
+    const part = await generateOne(turn.text, turn.voiceId, naturalSpeed(turn.voiceId, opts.speed ?? 1, i), opts.onProgress);
+    if (ticket !== neuralGen) throw new Error("canceled");
     sampleRate = part.sampleRate;
     chunks.push(part.audio);
-    if (i < turns.length - 1) chunks.push(silence(0.28, sampleRate));
+    const next = turns[i + 1];
+    if (next) chunks.push(silence(conversationalGap(turn.text, next.text, next.voiceId !== turn.voiceId), sampleRate));
   }
   if (!chunks.length) throw new Error("Nothing to speak");
   return encodeWav(concatFloat32(chunks), sampleRate);
+}
+
+function stopNeuralPlayback() {
+  for (const src of playSources) {
+    try { src.stop(); } catch { /* already stopped */ }
+  }
+  playSources.length = 0;
+  if (playCtx) {
+    playCtx.close().catch(() => undefined);
+    playCtx = null;
+  }
+}
+
+export async function playNeuralTurns(turns, opts = {}) {
+  const ticket = opts.ticket ?? ++neuralGen;
+  const items = turns.map((t, index) => ({ ...t, index })).filter((t) => t.text.trim());
+  if (!items.length) throw new Error("Nothing to speak");
+
+  const ctx = new AudioContext();
+  playCtx = ctx;
+  if (ctx.state === "suspended") await ctx.resume();
+
+  const gen = (item) =>
+    generateOne(item.text, item.voiceId, naturalSpeed(item.voiceId, opts.speed ?? 1, item.index), opts.onProgress);
+
+  let nextPart = await gen(items[0]);
+  if (ticket !== neuralGen) throw new Error("canceled");
+  let nextStart = ctx.currentTime + 0.03;
+
+  for (let i = 0; i < items.length; i++) {
+    if (ticket !== neuralGen) throw new Error("canceled");
+    if (playCtx !== ctx) throw new Error("canceled");
+    const item = items[i];
+    const part = nextPart;
+    const following = items[i + 1];
+    const prefetch = following ? gen(following) : null;
+
+    opts.onTurn?.(item.index);
+
+    const buffer = ctx.createBuffer(1, part.audio.length, part.sampleRate);
+    buffer.getChannelData(0).set(part.audio);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime + 0.015, nextStart);
+    src.start(startAt);
+    playSources.push(src);
+    const dur = part.audio.length / part.sampleRate;
+    const gap = following ? conversationalGap(item.text, following.text, following.voiceId !== item.voiceId) : 0;
+    nextStart = startAt + dur + gap;
+
+    if (prefetch) {
+      nextPart = await prefetch;
+      if (ticket !== neuralGen) throw new Error("canceled");
+    }
+  }
+
+  const remaining = Math.max(0, (nextStart - ctx.currentTime) * 1000);
+  if (remaining > 0) await sleep(remaining + 40);
+  if (ticket === neuralGen && playCtx === ctx) stopNeuralPlayback();
 }

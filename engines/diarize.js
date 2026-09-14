@@ -1,5 +1,5 @@
 const SPEAKER_COLORS = ["#d4785a", "#5b8f8a", "#c9a15b", "#7a8aa8"];
-const VOICE_CYCLE = ["am_adam", "af_bella", "bm_george", "af_sarah", "am_michael", "bf_emma"];
+const VOICE_CYCLE = ["am_fenrir", "af_heart", "am_michael", "af_bella"];
 
 function uid(prefix = "sp") {
   return `${prefix}_${crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)}`;

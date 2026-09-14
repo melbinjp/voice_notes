@@ -33,6 +33,7 @@
       </div>
       <div class="row">
         <button class="btn btn-sm" id="newNoteBtn" style="flex:1">New note</button>
+        <button class="btn btn-sm btn-secondary" id="newConvoBtn" aria-label="New conversation" title="New conversation">Talk</button>
         <button class="btn btn-sm btn-record" id="sidebarRecordBtn" aria-label="Record">Rec</button>
       </div>
       <div class="search-wrap">
@@ -137,11 +138,11 @@
   <div class="modal" id="packModal">
     <div class="modal-box">
       <h2>Offline Ready</h2>
-      <p class="sub">Download Whisper and the studio voices once. After that, record, transcribe, separate speakers, and speak notes with no network.</p>
+      <p class="sub">Download Whisper and Kokoro once. After that, record, transcribe, write a conversation, and speak notes with no network.</p>
       <ul class="pack-list">
         <li><div><strong>On-device storage</strong><span>Keeps models and notes if the browser would otherwise evict them</span></div><em id="packPersist">Needed</em></li>
         <li><div><strong>Whisper tiny</strong><span id="packWhisperHint">~40 MB, transcription without a server</span></div><em id="packWhisper">Needed</em></li>
-        <li><div><strong>Studio voices</strong><span id="packTtsHint">Ten named voices for multi-person speech</span></div><em id="packTts">Needed</em></li>
+        <li><div><strong>Studio voices</strong><span id="packTtsHint">Kokoro on this device — Heart and Fenrir, not the system robot</span></div><em id="packTts">Needed</em></li>
         <li><div><strong>App shell cached</strong><span>Workers and pages stored in this browser</span></div><em id="packCache">Needed</em></li>
       </ul>
       <div class="meter hidden" id="packMeter"><div id="packMeterBar"></div></div>
@@ -182,6 +183,6 @@
   <input type="file" id="audioFile" accept="audio/*" multiple hidden />
   <div class="toast-wrap" id="toastContainer"></div>
 
-  <script type="module" src="app.js?v=13"></script>
+  <script type="module" src="app.js?v=14"></script>
 </body>
 </html>
