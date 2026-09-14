@@ -1,4 +1,4 @@
-const CACHE = 'voice-notes-v5';
+const CACHE = 'voice-notes-v12';
 const SHELL = [
   './', './index.html', './app.js', './app-utils.js', './style.css',
   './manifest.json', './icon-192.png', './icon-512.png',
@@ -27,8 +27,6 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-
-  // CDN & external — network first with cache fallback
   if (url.origin !== location.origin) {
     e.respondWith(
       fetch(e.request)
@@ -37,8 +35,6 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
-
-  // App shell — cache first
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;

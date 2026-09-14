@@ -7,8 +7,8 @@
   "scope": ".",
   "display": "standalone",
   "display_override": ["standalone", "window-controls-overlay"],
-  "background_color": "#0b0f1a",
-  "theme_color": "#6366f1",
+  "background_color": "#0c0c0b",
+  "theme_color": "#141413",
   "orientation": "portrait-primary",
   "lang": "en",
   "dir": "ltr",
@@ -17,7 +17,7 @@
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "screenshots": [
-    { "src": "screenshot-1.png", "sizes": "540x960", "type": "image/png", "label": "Voice Notes main UI", "form_factor": "narrow" }
+    { "src": "screenshot-1.png", "sizes": "540x960", "type": "image/png", "label": "Voice Notes library", "form_factor": "narrow" }
   ],
   "shortcuts": [
     {
