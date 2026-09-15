@@ -1,1030 +1,993 @@
 import {
-  applyTheme, getStoredTheme, toggleTheme, showToast,
-  WaveformVisualizer, RecordingTimer,
-  exportNote, saveNote, loadAllNotes, deleteNote, clearAllNotes, encodeWAV, downloadFile
-} from './app-utils.js';
-import transcriptionQueue, { MAX_WORKERS } from './engines/transcription-queue.js';
+  applyTheme, getStoredTheme, toggleTheme, applyFontScale, showToast, uid, wordCount,
+  titleFromTranscript, formatDuration, dateGroup, summarizeLocal, applyDictationPunctuation,
+  exportNote, downloadFile, loadAllNotes, loadFolders, saveNote, saveFolder, deleteNote,
+  putAudio, getAudio, getFlag, setFlag, importLegacyNotes, WaveformVisualizer, LANGUAGES, seedLibrary,
+} from "./app-utils.js";
+import transcriptionQueue from "./engines/transcription-queue.js";
+import { diarizeBlob, dialogueText, parseLabeledTranscript } from "./engines/diarize.js";
+import {
+  STUDIO_VOICES, CONVO_VOICE_CYCLE, CONVO_NAMES, speakText, speakTurns, stopSpeaking,
+  preloadNeuralTts, generateNeuralSpeech, playNeuralTurns, ttsSupported, resolveStudioVoice,
+} from "./engines/tts.js";
 
-// ── Boot ────────────────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
-  initTheme();
-  initFontSize();
-  initCopyrightYear();
-  initModals();
-  initKeyboardShortcuts();
-  initApp();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+const SPEAKER_COLORS = ["#d4785a", "#5b8f8a", "#c9a15b", "#7a8aa8"];
+
+const $ = (id) => document.getElementById(id);
+const state = {
+  notes: [],
+  folders: [],
+  selectedId: null,
+  query: "",
+  filter: "all",
+  folderId: null,
+  tag: null,
+  rec: "idle",
+  recMs: 0,
+  recInterim: "",
+  speakingTurn: -1,
+  packing: false,
+  ttsReady: false,
+  whisperReady: false,
+  tab: "note",
+  pane: "text",
+  convoWho: "",
+  settings: {
+    theme: getStoredTheme(),
+    fontScale: localStorage.getItem("vn:fontScale") || localStorage.getItem("vn-fontsize") || "100",
+    language: localStorage.getItem("vn-lang") || "en-US",
+    engine: "webspeech",
+    autoTitle: true,
+    autoSummarize: true,
+    autoDiarize: true,
+    speakerCount: "auto",
+    ttsVoiceId: "af_heart",
+    ttsRate: 1,
+    dictationPunctuation: true,
+  },
+};
+
+let recStream, recRecorder, recChunks = [], recMime = "", recSpeech, recTimer, recStarted = 0, recAcc = 0, recFinal = "", recNoteId = null;
+let speakAudio = null;
+
+function speechCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function withSpeakers(n) {
+  return {
+    ...n,
+    speakers: (n.speakers || []).map((s) => ({ ...s, voiceId: resolveStudioVoice(s.voiceId) })),
+    speakerTurns: n.speakerTurns || [],
+    timedWords: n.timedWords || [],
+    tags: n.tags || [],
+  };
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  applyTheme(state.settings.theme);
+  applyFontScale(state.settings.fontScale);
+  $("fontSizeSlider").value = state.settings.fontScale;
+  $("autoTitle").checked = state.settings.autoTitle;
+  $("autoSummarize").checked = state.settings.autoSummarize;
+  $("autoDiarize").checked = state.settings.autoDiarize;
+  $("dictationPunctuation").checked = state.settings.dictationPunctuation;
+  $("speakerCount").value = state.settings.speakerCount;
+  $("languageSelector").innerHTML = LANGUAGES.map((l) => `<option value="${l.code}">${l.name}</option>`).join("");
+  $("languageSelector").value = state.settings.language;
+  $("ttsVoice").innerHTML = STUDIO_VOICES.map((v) => `<option value="${v.id}">${v.name} · ${v.hint}</option>`).join("");
+  $("ttsVoice").value = state.settings.ttsVoiceId;
+
+  await hydrate();
+  wire();
+  await initEngines();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  window.addEventListener("online", syncOnline);
+  window.addEventListener("offline", syncOnline);
+  syncOnline();
+  if (await getFlag("ttsReady")) {
+    state.ttsReady = true;
+    updatePackChip();
   }
+  if (await getFlag("whisperReady")) state.whisperReady = true;
+  if (new URLSearchParams(location.search).get("action") === "record") startRec();
 });
 
-// ── Theme & Font ─────────────────────────────────────────────────────────
-function initTheme() {
-  applyTheme(getStoredTheme());
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (getStoredTheme() === 'system') applyTheme('system');
-  });
-  document.getElementById('themeToggleBtn').addEventListener('click', toggleTheme);
-  document.getElementById('themeSelect').addEventListener('change', e => applyTheme(e.target.value));
+function syncOnline() {
+  const online = navigator.onLine;
+  $("offlineBadge").classList.toggle("hidden", online);
+  $("packOnline").textContent = online ? "Online now" : "You are offline";
 }
 
-function initFontSize() {
-  const slider = document.getElementById('fontSizeSlider');
-  const label = document.getElementById('fontSizeLabel');
-  const stored = localStorage.getItem('vn-fontsize') || '100';
-  slider.value = stored;
-  label.textContent = stored + '%';
-  document.documentElement.style.fontSize = (parseInt(stored) / 100) + 'rem';
-  slider.addEventListener('input', () => {
-    const v = slider.value;
-    label.textContent = v + '%';
-    document.documentElement.style.fontSize = (parseInt(v) / 100) + 'rem';
-    localStorage.setItem('vn-fontsize', v);
-  });
-}
-
-function initCopyrightYear() {
-  document.querySelectorAll('.copyright-year').forEach(el => {
-    el.textContent = new Date().getFullYear();
-  });
-}
-
-// ── Modals ───────────────────────────────────────────────────────────────
-function initModals() {
-  const pairs = [
-    ['settingsBtn', 'settingsModal', 'closeSettingsBtn'],
-    ['shortcutsBtn', 'shortcutsModal', 'closeShortcutsBtn'],
-  ];
-  pairs.forEach(([openId, modalId, closeId]) => {
-    const modal = document.getElementById(modalId);
-    document.getElementById(openId).addEventListener('click', () => modal.classList.add('open'));
-    document.getElementById(closeId).addEventListener('click', () => modal.classList.remove('open'));
-    modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
-  });
-}
-
-function closeAllModals() {
-  document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
-}
-
-// ── Keyboard Shortcuts ───────────────────────────────────────────────────
-function initKeyboardShortcuts() {
-  document.addEventListener('keydown', e => {
-    const activeEl = document.activeElement;
-    const tag = activeEl.tagName;
-    const isContentEditable = activeEl.isContentEditable;
-    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || isContentEditable;
-
-    if (e.key === 'Escape') { closeAllModals(); return; }
-
-    if (!typing && e.key === ' ') {
-      e.preventDefault();
-      document.getElementById('recordBtn').click();
+async function hydrate() {
+  let notes = await loadAllNotes();
+  let folders = await loadFolders();
+  const seeded = await getFlag("seeded");
+  if (!seeded && notes.length === 0) {
+    const legacy = await importLegacyNotes();
+    if (legacy.length) {
+      notes = legacy.map(withSpeakers);
+      for (const n of notes) await saveNote(n);
+    } else {
+      const seed = seedLibrary();
+      notes = seed.notes;
+      folders = seed.folders;
+      for (const n of notes) await saveNote(n);
+      for (const f of folders) await saveFolder(f);
     }
-    if (e.ctrlKey && e.shiftKey && e.key === 'C') {
-      e.preventDefault();
-      document.getElementById('copyTranscriptBtn').click();
-    }
-    if (e.ctrlKey && e.shiftKey && e.key === 'T') {
-      e.preventDefault();
-      toggleTheme();
-    }
-    if (e.ctrlKey && e.key === ',') {
-      e.preventDefault();
-      document.getElementById('settingsModal').classList.add('open');
-    }
-  });
-}
-
-// ── Main App ─────────────────────────────────────────────────────────────
-async function initApp() {
-  const el = {
-    recordBtn: document.getElementById('recordBtn'),
-    recordBtnIcon: document.getElementById('recordBtnIcon'),
-    recordBtnLabel: document.getElementById('recordBtnLabel'),
-    recordingStatus: document.getElementById('recordingStatus'),
-    recordingDot: document.getElementById('recordingDot'),
-    sessionTitle: document.getElementById('sessionTitle'),
-    transcript: document.getElementById('transcript'),
-    timedTranscript: document.getElementById('timedTranscript'),
-    tabText: document.getElementById('tabText'),
-    tabTimed: document.getElementById('tabTimed'),
-    wordCount: document.getElementById('wordCount'),
-    copyTranscriptBtn: document.getElementById('copyTranscriptBtn'),
-    exportBtn: document.getElementById('exportBtn'),
-    exportMenu: document.getElementById('exportMenu'),
-    exportTxt: document.getElementById('exportTxt'),
-    exportMd: document.getElementById('exportMd'),
-    exportJson: document.getElementById('exportJson'),
-    sendToLLMBtn: document.getElementById('sendToLLMBtn'),
-    summary: document.getElementById('summary'),
-    copySummaryBtn: document.getElementById('copySummaryBtn'),
-    statusBar: document.getElementById('statusBar'),
-    progressContainer: document.getElementById('progressContainer'),
-    progressLabel: document.getElementById('progressLabel'),
-    progressBar: document.getElementById('progressBar'),
-    audioFile: document.getElementById('audioFile'),
-    uploadArea: document.getElementById('uploadArea'),
-    uploadSection: document.getElementById('uploadSection'),
-    transcribeFileBtn: document.getElementById('transcribeFileBtn'),
-    fileInfo: document.getElementById('fileInfo'),
-    audioPlayback: document.getElementById('audioPlayback'),
-    engineSelector: document.getElementById('engineSelector'),
-    engineInfo: document.getElementById('engineInfo'),
-    languageSelector: document.getElementById('languageSelector'),
-    historyGrid: document.getElementById('historyGrid'),
-    historySearch: document.getElementById('historySearch'),
-    historySort: document.getElementById('historySort'),
-    clearAllBtn: document.getElementById('clearAllBtn'),
-    preloadModelsBtn: document.getElementById('preloadModelsBtn'),
-    whisperReadiness: document.getElementById('whisperReadiness'),
-    whisperProgressArea: document.getElementById('whisperProgressArea'),
-    whisperProgressFile: document.getElementById('whisperProgressFile'),
-    whisperProgressBar: document.getElementById('whisperProgressBar'),
-    summarizerReadiness: document.getElementById('summarizerReadiness'),
-    summarizerProgressArea: document.getElementById('summarizerProgressArea'),
-    summarizerProgressFile: document.getElementById('summarizerProgressFile'),
-    summarizerProgressBar: document.getElementById('summarizerProgressBar'),
-    // Inbox
-    recordingInbox: document.getElementById('recordingInbox'),
-    inboxList: document.getElementById('inboxList'),
-    inboxWorkerBadge: document.getElementById('inboxWorkerBadge'),
-    clearInboxBtn: document.getElementById('clearInboxBtn'),
-    bulkQueueCount: document.getElementById('bulkQueueCount'),
-    // TTS
-    ttsSpeakBtn: document.getElementById('ttsSpeakBtn'),
-    ttsSpeakIcon: document.getElementById('ttsSpeakIcon'),
-    ttsSpeakLabel: document.getElementById('ttsSpeakLabel'),
-    ttsStopBtn: document.getElementById('ttsStopBtn'),
-    ttsDownloadBtn: document.getElementById('ttsDownloadBtn'),
-    ttsVoiceSelect: document.getElementById('ttsVoiceSelect'),
-    ttsSpeedSlider: document.getElementById('ttsSpeedSlider'),
-    ttsSpeedValue: document.getElementById('ttsSpeedValue'),
-    ttsProgress: document.getElementById('ttsProgress'),
-    ttsProgressFill: document.getElementById('ttsProgressFill'),
-    ttsProgressLabel: document.getElementById('ttsProgressLabel'),
-    // Kokoro model card
-    kokoroReadiness: document.getElementById('kokoroReadiness'),
-    kokoroProgressArea: document.getElementById('kokoroProgressArea'),
-    kokoroProgressFile: document.getElementById('kokoroProgressFile'),
-    kokoroProgressBar: document.getElementById('kokoroProgressBar'),
-    // Settings
-    concurrencySelect: document.getElementById('concurrencySelect'),
-    concurrencyLabel: document.getElementById('concurrencyLabel'),
-  };
-
-  const state = {
-    isRecording: false,
-    transcriptText: '',
-    timedWords: [],
-    selectedFile: null,
-    currentNote: null,
-  };
-
-  const waveform = new WaveformVisualizer('waveformCanvas');
-  const timer = new RecordingTimer('recordingTimer');
-  let micStream = null;
-
-  const setStatus = msg => { el.statusBar.textContent = msg; };
-
-  const updateProgress = (show, pct = null, label = null) => {
-    if (pct === undefined) pct = null;
-    el.progressContainer.style.display = show ? 'block' : 'none';
-
-    if (pct === null && show && label && label.toLowerCase().includes('transcribing')) {
-        label = "Processing... This might take a few minutes depending on file size.";
-    }
-
-    if (label) el.progressLabel.textContent = label;
-    if (pct !== null) {
-      el.progressBar.style.animation = 'none';
-      el.progressBar.style.width = pct + '%';
-    } else if (show) {
-      el.progressBar.style.width = '100%';
-      el.progressBar.style.animation = 'pulse 1.5s infinite';
-    }
-    if (!show) { el.progressBar.style.animation = 'none'; el.progressBar.style.width = '0%'; }
-  };
-
-  const updateModelStatus = (model, status, data = null) => {
-    const badge = el[`${model}Readiness`];
-    const area = el[`${model}ProgressArea`];
-    const file = el[`${model}ProgressFile`];
-    const bar = el[`${model}ProgressBar`];
-    if (!badge) return;
-
-    if (status === 'loading') {
-      badge.textContent = 'Initializing…';
-      badge.dataset.state = 'downloading';
-    } else if (status === 'progress') {
-      area.style.display = 'block';
-      badge.textContent = 'Downloading…';
-      badge.dataset.state = 'downloading';
-      if (data?.file) file.textContent = `File: ${data.file}`;
-      if (data?.progress !== null && data?.progress !== undefined) bar.style.width = `${data.progress}%`;
-    } else if (status === 'ready') {
-      badge.textContent = 'Ready';
-      badge.dataset.state = 'ready';
-      area.style.display = 'none';
-      console.log(`[AI Model] ${model} is ready.`);
-    } else if (status === 'error') {
-      badge.textContent = 'Error';
-      badge.dataset.state = 'error';
-      showToast(`${model} model error: ${data}`, 'error');
-    }
-  };
-
-  const updateWordCount = () => {
-    const words = el.transcript.value.trim().split(/\s+/).filter(Boolean).length;
-    el.wordCount.textContent = `${words} word${words === 1 ? '' : 's'}`;
-  };
-
-  el.transcript.addEventListener('input', updateWordCount);
-
-  // ── Engine Manager ────────────────────────────────────────────────────
-  let manager = null;
-
-  // Import engines so they self-register with the module registry
-  await Promise.allSettled([
-    import('./engines/webspeech-engine.js'),
-    import('./engines/whisper-engine.js'),
-  ]);
-  const { default: ModularRecognitionManager } = await import('./modular-recognition-manager.js');
-  manager = new ModularRecognitionManager();
-  const engines = await manager.initializeEngines();
-
-  el.engineSelector.innerHTML = engines.map(e =>
-    `<option value="${e.id}">${e.icon || ''} ${e.name}</option>`
-  ).join('');
-
-  // Select best available engine — try in priority order, skip unavailable
-  const priorityOrder = ['whisper', 'webspeech'];
-  let engineReady = false;
-  for (const eid of priorityOrder) {
-    try {
-      await manager.setEngine(eid);
-      engineReady = true;
-      break;
-    } catch { /* engine not available, try next */ }
+    await setFlag("seeded", true);
   }
-  if (!engineReady) {
-    setStatus('No engines available — use Chrome/Edge on HTTPS for Web Speech API');
+  state.notes = notes.map(withSpeakers);
+  state.folders = folders;
+  state.selectedId = notes.find((n) => n.pinned)?.id || notes[0]?.id || null;
+  render();
+}
+
+async function initEngines() {
+  await Promise.allSettled([import("./engines/webspeech-engine.js"), import("./engines/whisper-engine.js")]);
+  const { default: ModularRecognitionManager } = await import("./modular-recognition-manager.js");
+  window.__mgr = new ModularRecognitionManager();
+  const engines = await window.__mgr.initializeEngines();
+  $("engineSelector").innerHTML = engines.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")
+    + `<option value="manual">Audio only, type later</option>`;
+  try { await window.__mgr.setEngine("whisper"); state.settings.engine = "whisper"; } catch {}
+  try { await window.__mgr.setEngine("webspeech"); state.settings.engine = "webspeech"; } catch {}
+  $("engineSelector").value = state.settings.engine;
+}
+
+function visible() {
+  const q = state.query.trim().toLowerCase();
+  return state.notes.filter((n) => {
+    if (state.filter === "pinned") return n.pinned && !n.archived;
+    if (state.filter === "archived") return n.archived;
+    return !n.archived;
+  }).filter((n) => state.folderId ? n.folderId === state.folderId : true)
+    .filter((n) => state.tag ? (n.tags || []).includes(state.tag) : true)
+    .filter((n) => !q || n.title.toLowerCase().includes(q) || (n.transcript || "").toLowerCase().includes(q) || (n.speakers || []).some((s) => s.name.toLowerCase().includes(q)))
+    .sort((a, b) => (a.pinned === b.pinned ? b.updatedAt - a.updatedAt : a.pinned ? -1 : 1));
+}
+
+function updatePackChip() {
+  const btn = $("offlineReadyBtn");
+  if (!btn) return;
+  btn.classList.toggle("ready", state.ttsReady && state.whisperReady);
+  btn.textContent = state.ttsReady && state.whisperReady ? "Ready" : state.packing ? "Packing" : "Offline Ready";
+}
+
+function render() {
+  const shown = visible();
+  $("filterAll").textContent = `All ${state.notes.filter((n) => !n.archived).length}`;
+  $("folderList").innerHTML = `<button class="nav-item ${!state.folderId ? "active" : ""}" data-folder="">All notebooks</button>` +
+    [...state.folders].sort((a, b) => a.name.localeCompare(b.name)).map((f) =>
+      `<button class="nav-item ${state.folderId === f.id ? "active" : ""}" data-folder="${f.id}">${esc(f.name)}</button>`
+    ).join("");
+  const tags = [...new Set(state.notes.flatMap((n) => n.tags || []))].sort();
+  $("tagList").innerHTML = tags.map((t) => `<button class="chip ${state.tag === t ? "active" : ""}" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
+  const groups = new Map();
+  for (const n of shown) {
+    const g = dateGroup(n.updatedAt);
+    groups.set(g, [...(groups.get(g) || []), n]);
   }
+  $("noteList").innerHTML = shown.length ? [...groups].map(([g, list]) =>
+    `<div class="group-label">${g}</div>` + list.map((n) =>
+      `<button class="note-item ${n.id === state.selectedId ? "active" : ""}" data-id="${n.id}">
+        <h3>${esc(n.title)}</h3>
+        <p>${esc(n.transcript || "Empty note")}</p>
+        <div class="meta"><span>${wordCount(n.transcript)} w</span>${n.durationMs ? `<span>${formatDuration(n.durationMs)}</span>` : ""}${n.speakers?.length > 1 ? `<span>${n.speakers.length} voices</span>` : ""}</div>
+        ${n.speakers?.length > 1 ? `<div class="voice-dots">${n.speakers.map((s) => `<span style="background:${s.color}"></span>`).join("")}</div>` : ""}
+      </button>`
+    ).join("")
+  ).join("") : `<p class="muted" style="padding:24px;text-align:center">Nothing here yet</p>`;
+  const sel = state.notes.find((n) => n.id === state.selectedId);
+  $("tabNoteLabel").textContent = sel?.title ? sel.title.slice(0, 12) : "Note";
+  $("statusBar").textContent = `${state.notes.length} notes · stored only on this device · ${state.ttsReady && state.whisperReady ? "offline pack ready" : "tap Offline Ready to cache models"}`;
+  updatePackChip();
+  renderEditor();
+}
 
-  updateEngineUI();
-  el.recordBtn.disabled = false;
+function pairSpeakers() {
+  return CONVO_NAMES.slice(0, 2).map((name, i) => ({
+    id: uid("sp"),
+    name,
+    color: SPEAKER_COLORS[i],
+    voiceId: CONVO_VOICE_CYCLE[i],
+  }));
+}
 
-  function updateEngineUI() {
-    const info = manager.getCurrentEngineInfo();
-    if (!info) return;
-    el.engineInfo.innerHTML = `
-      <div class="engine-info-name">${info.icon || ''} ${info.name}</div>
-      <div class="engine-info-desc">${info.description}</div>
-      <div class="engine-features">${info.features.map(f => `<span class="feature-badge">${f.replace(/_/g,' ')}</span>`).join('')}</div>
-    `;
-    const supportsFile = info.features.includes('file_transcription');
-    el.uploadSection.style.display = supportsFile ? 'block' : 'none';
-    el.engineSelector.value = info.id;
-    populateLanguages(info);
+function conversationHtml(note) {
+  const speakers = note.speakers || [];
+  const turns = note.speakerTurns || [];
+  if (!speakers.length) {
+    const canSplit = note.audioId || (note.transcript || "").trim();
+    return `<div class="convo-empty">
+      <p class="convo-title">Write a conversation</p>
+      <p class="muted">Two people, then type. Enter adds the line and hands the floor to the other person.</p>
+      <div class="row" style="justify-content:center;padding-top:16px">
+        <button class="btn" id="startConvoBtn">Start</button>
+        ${canSplit ? `<button class="btn btn-secondary" id="diarizeBtn">Split this take</button>` : ""}
+      </div>
+    </div>`;
   }
+  const who = speakers.some((s) => s.id === state.convoWho) ? state.convoWho : speakers[0].id;
+  state.convoWho = who;
+  const active = speakers.find((s) => s.id === who) || speakers[0];
+  const chips = speakers.map((s) => `
+    <div class="convo-chip ${s.id === who ? "selected" : ""}">
+      <button type="button" class="dot" style="background:${s.color}" data-pick="${s.id}" aria-label="Speak as ${escAttr(s.name)}"></button>
+      <input value="${escAttr(s.name)}" data-rename="${s.id}" aria-label="Name" />
+      <select data-voice="${s.id}">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === s.voiceId ? "selected" : ""}>${v.name}</option>`).join("")}</select>
+      ${speakers.length > 1 ? `<button type="button" class="convo-x" data-rmsp="${s.id}" aria-label="Remove ${escAttr(s.name)}">×</button>` : ""}
+    </div>`).join("");
+  const bubbles = turns.length
+    ? `<ol class="convo-list">${turns.map((t, i) => {
+        const sp = speakers.find((s) => s.id === t.speakerId);
+        const them = speakers.findIndex((s) => s.id === sp?.id) % 2 === 1;
+        return `<li class="convo-row ${them ? "them" : "mine"}">
+          <div class="convo-bubble ${state.speakingTurn === i ? "active" : ""}" style="border-left-color:${sp?.color || "var(--border)"}">
+            <header><span style="color:${sp?.color || "inherit"}">${esc(sp?.name || "Speaker")}</span>
+              <button type="button" class="convo-x" data-rmturn="${i}" aria-label="Remove line">×</button></header>
+            <textarea data-turn="${i}" rows="1">${esc(t.text)}</textarea>
+          </div>
+        </li>`;
+      }).join("")}</ol>`
+    : `<p class="muted">Type a line as ${esc(active.name)}. Enter sends it. The other person answers next.</p>`;
+  return `<div class="convo-pad">
+    <div class="convo-people">
+      ${chips}
+      ${speakers.length < 4 ? `<button type="button" class="convo-add" id="addPersonBtn">+ Person</button>` : ""}
+      <div class="convo-play-wrap">
+        ${note.audioId ? `<button class="btn btn-ghost btn-sm" id="diarizeBtn">From recording</button>` : ""}
+        <button class="btn btn-sm ${state.speakingTurn >= 0 ? "btn-record" : "btn-secondary"}" id="convoPlay" ${turns.length ? "" : "disabled"}>${state.speakingTurn >= 0 ? "Stop" : "Play"}</button>
+      </div>
+    </div>
+    ${bubbles}
+    <form class="convo-compose" id="convoForm">
+      <span class="dot" style="background:${active.color}"></span>
+      <input id="convoDraft" placeholder="Say as ${escAttr(active.name)}" aria-label="Line as ${escAttr(active.name)}" autocomplete="off" />
+      <button class="btn btn-sm" type="submit">Enter</button>
+    </form>
+    ${state.ttsReady ? "" : `<button type="button" class="pack-hint" id="needPack2">Natural voices after Offline Ready: Heart and Fenrir, not the system robot.</button>`}
+  </div>`;
+}
 
-  el.engineSelector.addEventListener('change', async e => {
-    try {
-      setStatus(`Switching to ${e.target.value}...`);
-      await manager.setEngine(e.target.value);
-      updateEngineUI();
-      
-      // If switching to Whisper, proactively start preloading to show progress
-      if (e.target.value === 'whisper') {
-        manager.preloadEngine('whisper', (status, data) => {
-          updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
-          if (status === 'ready') updateModelStatus('whisper', 'ready');
-        }).catch(err => console.error('Switch-time preload failed:', err));
-      }
-      
-      showToast('Engine switched', 'success');
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, 'error');
+function renderEditor() {
+  const note = state.notes.find((n) => n.id === state.selectedId);
+  const root = $("editorRoot");
+  if (!note) {
+    root.innerHTML = `<div class="empty-studio"><div class="empty-card">
+      <p class="section-label" style="justify-content:center;padding:0">Studio</p>
+      <h2>Ready when you are</h2>
+      <p>Hold the room. Record, drop a file, or write a conversation. Nothing leaves this device.</p>
+      <button class="rec-btn" id="heroRec" aria-label="Start recording">●</button>
+      <div class="timer">${formatDuration(state.recMs)}</div>
+      <div class="hint">Press Space to record</div>
+      <button class="btn btn-secondary" id="emptyConvoBtn" style="margin-top:20px">Write a conversation</button>
+    </div></div>`;
+    $("heroRec")?.addEventListener("click", () => toggleRec());
+    $("emptyConvoBtn")?.addEventListener("click", () => startConversation());
+    return;
+  }
+  const live = state.rec !== "idle" && recNoteId === note.id;
+  const speakers = note.speakers || [];
+  root.innerHTML = `<article class="editor">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+      <input class="editor-title" id="titleInput" value="${escAttr(note.title)}" aria-label="Note title" />
+      <div style="display:flex;gap:4px">
+        <button class="btn-icon" id="pinBtn" title="Pin">${note.pinned ? "unpin" : "pin"}</button>
+        <button class="btn-icon" id="sumBtn" title="Summarize">sum</button>
+        <button class="btn-icon" id="speakBtn" title="Speak">${state.speakingTurn >= 0 ? "stop" : "speak"}</button>
+      </div>
+    </div>
+    <div class="editor-meta">
+      <span>${new Date(note.updatedAt).toLocaleString()}</span>
+      <span>${wordCount(note.transcript)} words</span>
+      ${note.durationMs ? `<span>${formatDuration(note.durationMs)}</span>` : ""}
+      <span>${note.engine || ""}</span>
+      ${speakers.length > 1 ? `<span>${speakers.length} speakers</span>` : ""}
+    </div>
+    ${live ? `<div style="border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px;text-align:center">
+      <canvas id="wave" width="640" height="64"></canvas>
+      <button class="rec-btn live" id="heroRec" aria-label="Stop recording">■</button>
+      <div class="timer">${formatDuration(state.recMs)}</div>
+    </div>` : ""}
+    ${note.audioId && !live ? `<div class="audio-bar" id="audioBar"></div>` : ""}
+    <div class="listen-bar">
+      <button class="btn btn-sm ${state.speakingTurn >= 0 ? "btn-record" : "btn-secondary"}" id="listenBtn">${state.speakingTurn >= 0 ? "Stop" : speakers.length > 1 ? "Play dialogue" : "Listen"}</button>
+      <button class="btn btn-ghost btn-sm" id="wavBtn">WAV</button>
+      ${speakers.length <= 1 ? `<select id="voiceSelect">${STUDIO_VOICES.map((v) => `<option value="${v.id}" ${v.id === state.settings.ttsVoiceId ? "selected" : ""}>${v.name} · ${v.hint}</option>`).join("")}</select>` : ""}
+      ${state.ttsReady ? "" : `<button class="btn btn-ghost btn-sm" id="needPack">Neural voices need Offline Ready</button>`}
+    </div>
+    <div class="tags" id="noteTags">${(note.tags || []).map((t) => `<button class="chip" data-rmtag="${esc(t)}">${esc(t)} ×</button>`).join("")}
+      <input id="tagDraft" placeholder="Add tag" style="border:0;background:transparent;color:inherit;width:7rem;font-size:12px;outline:none" />
+    </div>
+    <div class="tabs">
+      <button class="${state.pane !== "conversation" ? "active" : ""}" data-pane="text">Transcript</button>
+      <button class="${state.pane === "conversation" ? "active" : ""}" data-pane="conversation">Conversation${speakers.length ? ` · ${speakers.length}` : ""}</button>
+    </div>
+    <div id="pane-text" class="${state.pane === "conversation" ? "hidden" : ""}">
+      <textarea class="transcript" id="transcript">${esc(note.transcript)}</textarea>
+    </div>
+    <div id="pane-conversation" class="${state.pane === "conversation" ? "" : "hidden"}">
+      ${conversationHtml(note)}
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px">
+      <span class="section-label" style="padding:0">Summary</span>
+      <button class="btn btn-ghost btn-sm" id="sumBtn2">Refresh</button>
+    </div>
+    <div class="summary-box" id="summaryBox">${esc(note.summary) || "Summaries run on-device from the transcript."}</div>
+    <div class="row" style="padding:16px 0 0">
+      <button class="btn btn-secondary btn-sm" data-export="md">Markdown</button>
+      <button class="btn btn-ghost btn-sm" data-export="txt">Text</button>
+      <button class="btn btn-ghost btn-sm" data-export="json">JSON</button>
+      <button class="btn btn-ghost btn-sm" id="delBtn">Delete</button>
+    </div>
+  </article>`;
+  $("titleInput")?.addEventListener("input", (e) => patch(note.id, { title: e.target.value }));
+  $("transcript")?.addEventListener("input", (e) => patch(note.id, { transcript: e.target.value }));
+  $("pinBtn")?.addEventListener("click", () => patch(note.id, { pinned: !note.pinned }));
+  $("sumBtn")?.addEventListener("click", () => doSummary(note.id));
+  $("sumBtn2")?.addEventListener("click", () => doSummary(note.id));
+  $("speakBtn")?.addEventListener("click", () => speakNote(note));
+  $("listenBtn")?.addEventListener("click", () => speakNote(note));
+  $("wavBtn")?.addEventListener("click", () => downloadSpeech(note));
+  $("needPack")?.addEventListener("click", () => $("packModal").classList.add("open"));
+  $("voiceSelect")?.addEventListener("change", (e) => { state.settings.ttsVoiceId = e.target.value; });
+  $("diarizeBtn")?.addEventListener("click", () => diarizeNote(note.id));
+  $("startConvoBtn")?.addEventListener("click", () => startConversation(note.id));
+  $("addPersonBtn")?.addEventListener("click", () => addSpeaker(note.id));
+  $("convoPlay")?.addEventListener("click", () => (state.speakingTurn >= 0 ? stopSpeakAudio() : speakNote(note)));
+  $("needPack2")?.addEventListener("click", () => $("packModal").classList.add("open"));
+  $("convoForm")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const draft = $("convoDraft");
+    const line = draft?.value.trim();
+    if (!line) return;
+    // Cleared before the save, so the next line starts empty. Without this every
+    // line carried all the earlier ones with it.
+    draft.value = "";
+    const who = state.convoWho || note.speakers[0]?.id;
+    if (who) void addTurn(note.id, who, line);
+  });
+  $("delBtn")?.addEventListener("click", async () => {
+    if (!confirm("Delete this note?")) return;
+    await deleteNote(note.id);
+    state.notes = state.notes.filter((n) => n.id !== note.id);
+    state.selectedId = state.notes[0]?.id || null;
+    render();
+    showToast("Note deleted");
+  });
+  $("tagDraft")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      const v = e.target.value.trim().replace(/^#/, "").toLowerCase();
+      if (v && !(note.tags || []).includes(v)) patch(note.id, { tags: [...(note.tags || []), v] });
+      e.target.value = "";
     }
   });
+  root.querySelectorAll("[data-rmtag]").forEach((b) => b.addEventListener("click", () => patch(note.id, { tags: note.tags.filter((t) => t !== b.dataset.rmtag) })));
+  root.querySelectorAll("[data-export]").forEach((b) => b.addEventListener("click", () => exportNote(note, b.dataset.export)));
+  root.querySelectorAll("[data-rename]").forEach((inp) => inp.addEventListener("change", async (e) => {
+    const speakers = note.speakers.map((s) => s.id === e.target.dataset.rename ? { ...s, name: e.target.value } : s);
+    const transcript = note.speakerTurns.length > 1 ? dialogueText(speakers, note.speakerTurns) : note.transcript;
+    await patch(note.id, { speakers, transcript });
+  }));
+  root.querySelectorAll("[data-voice]").forEach((sel) => sel.addEventListener("change", (e) => {
+    const speakers = note.speakers.map((s) => s.id === e.target.dataset.voice ? { ...s, voiceId: e.target.value } : s);
+    patch(note.id, { speakers });
+  }));
+  root.querySelectorAll("[data-pane]").forEach((b) => b.addEventListener("click", () => {
+    state.pane = b.dataset.pane;
+    root.querySelectorAll("[data-pane]").forEach((x) => x.classList.toggle("active", x === b));
+    $("pane-text")?.classList.toggle("hidden", state.pane !== "text");
+    $("pane-conversation")?.classList.toggle("hidden", state.pane !== "conversation");
+    if (state.pane === "conversation") requestAnimationFrame(() => $("convoDraft")?.focus());
+  }));
+  root.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => {
+    state.convoWho = b.dataset.pick;
+    render();
+    requestAnimationFrame(() => $("convoDraft")?.focus());
+  }));
+  root.querySelectorAll("[data-rmsp]").forEach((b) => b.addEventListener("click", () => removeSpeaker(note.id, b.dataset.rmsp)));
+  root.querySelectorAll("[data-rmturn]").forEach((b) => b.addEventListener("click", () => removeTurn(note.id, Number(b.dataset.rmturn))));
+  root.querySelectorAll("[data-turn]").forEach((ta) => {
+    // A line is as tall as its text, so nothing is cut off mid-sentence.
+    const fit = () => { ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`; };
+    requestAnimationFrame(fit);
+    ta.addEventListener("input", fit);
+    ta.addEventListener("change", (e) => updateTurn(note.id, Number(e.target.dataset.turn), e.target.value));
+  });
+  $("heroRec")?.addEventListener("click", () => toggleRec());
+  if (note.audioId) mountAudio(note.audioId);
+  if (state.pane === "conversation") requestAnimationFrame(() => $("convoDraft")?.focus());
+}
 
-  // ── Language Selector ─────────────────────────────────────────────────
-  function populateLanguages(info) {
-    const langs = info.languages || [];
-    if (!langs.length) {
-      el.languageSelector.innerHTML = '<option value="">No language options</option>';
-      el.languageSelector.disabled = true;
+async function mountAudio(id) {
+  const rec = await getAudio(id);
+  const bar = $("audioBar");
+  if (!rec || !bar) return;
+  const url = URL.createObjectURL(rec.blob);
+  bar.innerHTML = `<audio controls src="${url}" style="width:100%"></audio>`;
+}
+
+async function patch(id, p) {
+  const current = state.notes.find((n) => n.id === id);
+  if (!current) return;
+  let next = p;
+  if (p.transcript && !p.speakers && !p.speakerTurns && !(current.speakers || []).length) {
+    const labeled = parseLabeledTranscript(p.transcript);
+    if (labeled && labeled.speakers.length >= 2) {
+      next = { ...p, speakers: labeled.speakers, speakerTurns: labeled.turns };
+      state.pane = "conversation";
+    }
+  }
+  state.notes = state.notes.map((n) => n.id === id ? withSpeakers({ ...n, ...next, updatedAt: Date.now() }) : n);
+  const n = state.notes.find((x) => x.id === id);
+  if (n) await saveNote(n);
+  render();
+}
+
+async function createNote(partial = {}) {
+  const now = Date.now();
+  const note = withSpeakers({
+    id: uid(), title: "Untitled note", transcript: "", summary: "", tags: [], folderId: state.folderId,
+    pinned: false, archived: false, createdAt: now, updatedAt: now, durationMs: 0, engine: "manual",
+    language: state.settings.language, timedWords: [], audioId: null, audioMime: null,
+    speakers: [], speakerTurns: [], ...partial,
+  });
+  state.notes = [note, ...state.notes];
+  state.selectedId = note.id;
+  state.tab = "note";
+  await saveNote(note);
+  render();
+  return note;
+}
+
+async function doSummary(id) {
+  const n = state.notes.find((x) => x.id === id);
+  if (!n?.transcript.trim()) { showToast("Nothing to summarize yet"); return; }
+  await patch(id, { summary: summarizeLocal(n.transcript) });
+  showToast("Summary ready");
+}
+
+async function startConversation(noteId) {
+  const speakers = pairSpeakers();
+  state.pane = "conversation";
+  state.convoWho = speakers[0].id;
+  state.tab = "note";
+  if (noteId) {
+    const note = state.notes.find((n) => n.id === noteId);
+    if (note && !(note.speakers || []).length) {
+      const title = note.title === "Untitled note" || note.title === "Recording" ? "Conversation" : note.title;
+      await patch(noteId, {
+        speakers,
+        speakerTurns: [],
+        title,
+        tags: (note.tags || []).includes("conversation") ? note.tags : [...(note.tags || []), "conversation"],
+      });
       return;
     }
-    el.languageSelector.disabled = false;
-    el.languageSelector.innerHTML = langs.map(l =>
-      `<option value="${l.code}">${l.name}</option>`
-    ).join('');
-    const stored = localStorage.getItem('vn-lang');
-    if (stored && langs.find(l => l.code === stored)) el.languageSelector.value = stored;
-  }
-
-  el.languageSelector.addEventListener('change', async e => {
-    const lang = e.target.value;
-    if (!lang) return;
-    localStorage.setItem('vn-lang', lang);
-    try {
-      await manager.setLanguage(lang);
-      showToast(`Language set to ${lang}`, 'info');
-    } catch (err) {
-      showToast(`Language not supported: ${err.message}`, 'warning');
+    if (note) {
+      state.selectedId = noteId;
+      render();
+      return;
     }
-  });
-
-  // ── Recording ─────────────────────────────────────────────────────────
-  // For Whisper: record with MediaRecorder, enqueue blob on stop (non-blocking).
-  // For WebSpeech: real-time transcription as before.
-
-  let whisperRecorder = null;
-  let whisperChunks   = [];
-  let whisperMime     = '';
-
-  function resetRecordBtn() {
-    state.isRecording = false;
-    el.recordBtnIcon.textContent  = '🎙️';
-    el.recordBtnLabel.textContent = 'Start Recording';
-    el.recordBtn.classList.remove('recording');
-    el.recordBtn.disabled = false;
-    el.recordingDot.classList.remove('active');
-    el.recordingStatus.textContent = '';
   }
+  await createNote({
+    title: "Conversation",
+    speakers,
+    speakerTurns: [],
+    tags: ["conversation"],
+  });
+}
 
-  const startRecording = async () => {
-    const engineInfo = manager.getCurrentEngineInfo();
-    const isWhisper  = engineInfo && engineInfo.id === 'whisper';
+async function addSpeaker(noteId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || (note.speakers || []).length >= 4) return;
+  const i = note.speakers.length;
+  const speaker = {
+    id: uid("sp"),
+    name: CONVO_NAMES[i] || `Speaker ${i + 1}`,
+    color: SPEAKER_COLORS[i % SPEAKER_COLORS.length],
+    voiceId: CONVO_VOICE_CYCLE[i % CONVO_VOICE_CYCLE.length],
+  };
+  await patch(noteId, { speakers: [...note.speakers, speaker] });
+}
 
-    state.isRecording     = true;
-    state.transcriptText  = '';
-    state.timedWords      = [];
-    el.transcript.value   = '';
-    el.timedTranscript.innerHTML = '<div class="history-empty">Recording…</div>';
-    el.recordBtnIcon.textContent  = '⏹️';
-    el.recordBtnLabel.textContent = 'Stop';
-    el.recordBtn.classList.add('recording');
-    el.recordingDot.classList.add('active');
-    el.recordingStatus.textContent = isWhisper
-      ? 'Recording… (queued for transcription on stop)'
-      : 'Recording…';
-    timer.start();
+async function removeSpeaker(noteId, speakerId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || note.speakers.length <= 1) return;
+  const speakers = note.speakers.filter((s) => s.id !== speakerId);
+  const fallback = speakers[0].id;
+  const speakerTurns = note.speakerTurns.map((t) => t.speakerId === speakerId ? { ...t, speakerId: fallback } : t);
+  if (state.convoWho === speakerId) state.convoWho = fallback;
+  await patch(noteId, { speakers, speakerTurns, transcript: dialogueText(speakers, speakerTurns) });
+}
 
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      waveform.start(micStream);
-    } catch (_) {}
+async function addTurn(noteId, speakerId, text) {
+  const note = state.notes.find((n) => n.id === noteId);
+  const line = text.trim();
+  if (!note || !line) return;
+  const last = note.speakerTurns[note.speakerTurns.length - 1];
+  const start = last ? last.end + 0.45 : 0;
+  const dur = Math.max(1.1, line.split(/\s+/).length * 0.36);
+  const speakerTurns = [...note.speakerTurns, { speakerId, start, end: start + dur, text: line }];
+  const idx = Math.max(0, note.speakers.findIndex((s) => s.id === speakerId));
+  state.convoWho = note.speakers[(idx + 1) % note.speakers.length]?.id || speakerId;
+  const title = note.title === "Conversation" || note.title === "Untitled note" ? titleFromTranscript(line) : note.title;
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns), title });
+  requestAnimationFrame(() => $("convoDraft")?.focus());
+}
 
-    if (isWhisper) {
-      // ── Whisper path: MediaRecorder → blob → queue ──────────────────
-      const mimes = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
-      whisperMime   = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
-      whisperChunks = [];
-      whisperRecorder = new MediaRecorder(micStream, whisperMime ? { mimeType: whisperMime } : {});
-      whisperRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) whisperChunks.push(e.data); };
-      whisperRecorder.onstop = () => {
-        if (!whisperChunks.length) return;
-        const blob = new Blob(whisperChunks, { type: whisperMime || 'audio/webm' });
-        whisperChunks = [];
-        const sessionName = el.sessionTitle.value.trim()
-          || `Recording ${new Date().toLocaleTimeString()}`;
-        transcriptionQueue.setLanguage(localStorage.getItem('vn-lang') || 'auto');
-        transcriptionQueue.enqueue(blob, sessionName);
-        showToast('Recording queued for transcription ⚡', 'info');
+async function updateTurn(noteId, index, text) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note || !note.speakerTurns[index]) return;
+  const speakerTurns = note.speakerTurns.map((t, i) => i === index ? { ...t, text } : t);
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns) });
+}
+
+async function removeTurn(noteId, index) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note) return;
+  const speakerTurns = note.speakerTurns.filter((_, i) => i !== index);
+  await patch(noteId, { speakerTurns, transcript: dialogueText(note.speakers, speakerTurns) });
+}
+
+function highlightTurn(i) {
+  document.querySelectorAll(".convo-bubble").forEach((el, idx) => el.classList.toggle("active", idx === i));
+}
+
+async function diarizeNote(id) {
+  const note = state.notes.find((n) => n.id === id);
+  if (!note) return;
+  try {
+    if (note.audioId) {
+      const rec = await getAudio(note.audioId);
+      if (!rec) throw new Error("Audio is missing for this note");
+      const k = state.settings.speakerCount === "auto" ? "auto" : Number(state.settings.speakerCount);
+      const result = await diarizeBlob(rec.blob, { k, timedWords: note.timedWords, transcript: note.transcript });
+      const transcript = result.turns.some((t) => t.text) && result.speakers.length > 1
+        ? dialogueText(result.speakers, result.turns)
+        : note.transcript;
+      state.pane = "conversation";
+      await patch(id, { speakers: result.speakers, speakerTurns: result.turns, timedWords: result.timedWords.length ? result.timedWords : note.timedWords, transcript });
+      showToast(result.speakers.length > 1 ? `Separated ${result.speakers.length} speakers` : "One speaker throughout");
+    } else if (note.transcript) {
+      const labeled = parseLabeledTranscript(note.transcript);
+      if (!labeled) { showToast("Need a recording, or label turns like “Alex: …”"); return; }
+      state.pane = "conversation";
+      await patch(id, { speakers: labeled.speakers, speakerTurns: labeled.turns });
+      showToast(`Found ${labeled.speakers.length} speakers in the transcript`);
+    } else showToast("Record or drop audio first");
+  } catch (err) {
+    showToast(err.message || "Could not separate speakers");
+  }
+}
+
+function stopSpeakAudio() {
+  stopSpeaking();
+  if (speakAudio) {
+    speakAudio.pause();
+    speakAudio.src = "";
+    speakAudio = null;
+  }
+  state.speakingTurn = -1;
+  highlightTurn(-1);
+  const listen = $("listenBtn");
+  const play = $("convoPlay");
+  if (listen) {
+    const n = state.notes.find((x) => x.id === state.selectedId);
+    listen.textContent = (n?.speakers || []).length > 1 ? "Play dialogue" : "Listen";
+    listen.classList.remove("btn-record");
+    listen.classList.add("btn-secondary");
+  }
+  if (play) {
+    play.textContent = "Play";
+    play.classList.remove("btn-record");
+    play.classList.add("btn-secondary");
+    play.disabled = !(state.notes.find((x) => x.id === state.selectedId)?.speakerTurns || []).length;
+  }
+}
+
+async function speakNote(note) {
+  if (state.speakingTurn >= 0) {
+    stopSpeakAudio();
+    return;
+  }
+  const sel = window.getSelection()?.toString().trim();
+  const byId = new Map((note.speakers || []).map((s) => [s.id, s]));
+  const turns = !sel && (note.speakerTurns || []).length > 0
+    ? note.speakerTurns.filter((t) => t.text.trim()).map((t) => ({
+        text: t.text,
+        voiceId: resolveStudioVoice(byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId),
+      }))
+    : [{ text: sel || note.transcript.trim(), voiceId: resolveStudioVoice(state.settings.ttsVoiceId) }];
+  if (!turns.some((t) => t.text.trim())) { showToast("Nothing to speak"); return; }
+  stopSpeakAudio();
+  state.speakingTurn = 0;
+  const listen = $("listenBtn");
+  const play = $("convoPlay");
+  if (listen) { listen.textContent = "Stop"; listen.classList.add("btn-record"); }
+  if (play) { play.textContent = "Stop"; play.disabled = false; play.classList.add("btn-record"); }
+  try {
+    if (state.ttsReady && !sel) {
+      try {
+        await playNeuralTurns(turns, {
+          speed: state.settings.ttsRate,
+          onTurn: (i) => { state.speakingTurn = i; highlightTurn(i); },
+        });
+        return;
+      } catch (err) {
+        if (err.message === "canceled") return;
+        showToast("Studio voices unavailable, so using system speech");
+      }
+    } else if (!state.ttsReady && turns.length > 1) {
+      showToast("Using system voices. Offline Ready loads the natural studio pack.");
+    }
+    if (!ttsSupported()) { showToast("Speech is not available"); return; }
+    await speakTurns(turns, { rate: state.settings.ttsRate, onTurn: (i) => { state.speakingTurn = i; highlightTurn(i); } });
+  } catch (err) {
+    if (err.message === "canceled") return;
+    if (["synthesis-failed", "audio-busy", "not-allowed"].includes(err.message)) {
+      $("packModal").classList.add("open");
+      showToast("System speech failed. Offline Ready loads the natural studio voices.");
+      return;
+    }
+    showToast(err.message || "Could not speak");
+  } finally {
+    if (!speakAudio) { state.speakingTurn = -1; highlightTurn(-1); stopSpeakAudio(); }
+  }
+}
+
+async function downloadSpeech(note) {
+  if (!note.transcript.trim()) { showToast("Nothing to speak"); return; }
+  if (!state.ttsReady) { $("packModal").classList.add("open"); showToast("Download Offline Ready first to export studio voices"); return; }
+  try {
+    const byId = new Map((note.speakers || []).map((s) => [s.id, s]));
+    const turns = note.speakerTurns?.length
+      ? note.speakerTurns.map((t) => ({
+          text: t.text,
+          voiceId: resolveStudioVoice(byId.get(t.speakerId)?.voiceId || state.settings.ttsVoiceId),
+        }))
+      : [{ text: note.transcript, voiceId: resolveStudioVoice(state.settings.ttsVoiceId) }];
+    const blob = await generateNeuralSpeech(turns, { speed: state.settings.ttsRate });
+    downloadFile(`${(note.title || "voice").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.wav`, blob, "audio/wav");
+    showToast("Speech saved as WAV");
+  } catch (err) {
+    showToast(err.message || "Could not generate speech");
+  }
+}
+
+async function prepareOffline() {
+  if (state.packing) return;
+  state.packing = true;
+  updatePackChip();
+  $("packModal").classList.add("open");
+  $("downloadPackBtn").disabled = true;
+  try {
+    if (navigator.storage?.persist) {
+      const ok = await navigator.storage.persist();
+      await setFlag("storagePersisted", ok);
+      setPackRow("packPersist", ok);
+    }
+    if ("caches" in window) {
+      const cache = await caches.open("voice-notes-v14");
+      await Promise.all([
+        "./", "./index.html", "./app.js", "./app-utils.js", "./style.css",
+        "./engines/tts-worker.js", "./engines/whisper-worker.js", "./engines/diarize.js", "./engines/tts.js",
+      ].map((u) => cache.add(u).catch(() => undefined)));
+      setPackRow("packCache", true);
+    }
+    $("packMeter").classList.remove("hidden");
+    setPackRow("packWhisper", false, true);
+    const w = new Worker("engines/whisper-worker.js", { type: "module" });
+    await new Promise((resolve, reject) => {
+      w.onmessage = (ev) => {
+        if (ev.data.status === "progress") {
+          const pct = ev.data.data?.progress || 0;
+          $("packMeterBar").style.width = `${pct}%`;
+          $("packWhisperHint").textContent = ev.data.data?.file || "model";
+        }
+        if (ev.data.status === "preload_done" || ev.data.status === "ready") { w.terminate(); resolve(); }
+        if (ev.data.status === "error") { w.terminate(); reject(new Error(ev.data.error)); }
       };
-      whisperRecorder.start(1000);
-    } else {
-      // ── WebSpeech path: real-time transcription ──────────────────────
-      await manager.start(
-        result => {
-          if (result.isFinal) state.transcriptText += result.text + ' ';
-          el.transcript.value = state.transcriptText + (result.interim || '');
-          updateWordCount();
-          if (result.chunks) {
-            state.timedWords = [...state.timedWords, ...result.chunks];
-            renderTimedTranscript(state.timedWords);
-          }
-        },
-        err => { showToast(`Recognition error: ${err}`, 'error'); stopRecording(); },
-        () => {}
-      );
-    }
-  };
-
-  const stopRecording = async () => {
-    const engineInfo = manager.getCurrentEngineInfo();
-    const isWhisper  = engineInfo && engineInfo.id === 'whisper';
-
-    waveform.stop();
-    timer.stop();
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-
-    if (isWhisper) {
-      if (whisperRecorder && whisperRecorder.state !== 'inactive') whisperRecorder.stop();
-      whisperRecorder = null;
-      resetRecordBtn(); // re-enable immediately — transcription runs in background queue
-    } else {
-      await manager.stop();
-      resetRecordBtn();
-      setStatus('Stopped');
-      updateWordCount();
-    }
-  };
-
-  el.recordBtn.addEventListener('click', async () => {
-    if (state.isRecording) { await stopRecording(); }
-    else {
-      try { await startRecording(); }
-      catch (err) {
-        resetRecordBtn();
-        timer.stop();
-        waveform.stop();
-        showToast(`Error: ${err.message}`, 'error');
-      }
-    }
-  });
-
-
-  // ── Timed Transcript ──────────────────────────────────────────────────
-  const switchTab = tab => {
-    const isText = tab === 'text';
-    el.tabText.classList.toggle('active', isText);
-    el.tabTimed.classList.toggle('active', !isText);
-    el.tabText.setAttribute('aria-selected', isText);
-    el.tabTimed.setAttribute('aria-selected', !isText);
-    document.getElementById('transcriptTextView').style.display = isText ? 'block' : 'none';
-    el.timedTranscript.style.display = isText ? 'none' : 'block';
-  };
-  el.tabText.addEventListener('click', () => switchTab('text'));
-  el.tabTimed.addEventListener('click', () => switchTab('timed'));
-
-  function renderTimedTranscript(words) {
-    if (!words?.length) { el.timedTranscript.innerHTML = '<div class="history-empty">No interactive transcript.</div>'; return; }
-    el.timedTranscript.innerHTML = '';
-    words.forEach((w, i) => {
-      const span = document.createElement('span');
-      span.className = 'transcript-word';
-      span.textContent = w.word + ' ';
-      span.dataset.start = w.start;
-      span.dataset.end = w.end;
-      span.contentEditable = 'true';
-
-      span.addEventListener('mousedown', (e) => {
-        // Only play if not actively editing
-        if (document.activeElement !== span) {
-            el.audioPlayback.currentTime = w.start;
-            el.audioPlayback.play();
-        }
-      });
-
-      span.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') {
-              e.preventDefault();
-              span.blur();
-          }
-      });
-
-      span.addEventListener('input', (e) => {
-        w.word = span.textContent.trim();
-        // Update main transcript text as well
-        // make sure words array is kept in sync
-        el.transcript.value = words.map(word => word.word).filter(w => w.length > 0).join(' ');
-        state.transcriptText = el.transcript.value;
-      });
-
-      el.timedTranscript.appendChild(span);
-    });
-  }
-
-  let manualScrollTimeout = null;
-  let isScrollingManually = false;
-
-  const handleManualScroll = () => {
-    isScrollingManually = true;
-    if (manualScrollTimeout) clearTimeout(manualScrollTimeout);
-    manualScrollTimeout = setTimeout(() => {
-        isScrollingManually = false;
-    }, 3000); // Resume auto-scroll after 3 seconds of no scrolling
-  };
-
-  el.timedTranscript.addEventListener('wheel', handleManualScroll, { passive: true });
-  el.timedTranscript.addEventListener('touchmove', handleManualScroll, { passive: true });
-
-  el.audioPlayback.addEventListener('timeupdate', () => {
-    const t = el.audioPlayback.currentTime;
-    el.timedTranscript.querySelectorAll('.transcript-word').forEach(span => {
-      const active = t >= parseFloat(span.dataset.start) && t <= parseFloat(span.dataset.end);
-      span.classList.toggle('active-word', active);
-      if (active && !isScrollingManually) {
-          span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      w.postMessage({ action: "preload", id: "preload" });
+    }).catch(() => showToast("Whisper will download on first transcription"));
+    state.whisperReady = true;
+    await setFlag("whisperReady", true);
+    setPackRow("packWhisper", true);
+    setPackRow("packTts", false, true);
+    await preloadNeuralTts((p) => {
+      if (p.status === "progress") {
+        $("packMeterBar").style.width = `${p.progress || 8}%`;
+        $("packTtsHint").textContent = p.file || "voices";
       }
     });
-  });
-
-  // ── File Upload (Bulk) ────────────────────────────────────────────────
-  let pendingFiles = [];
-
-  function updateBulkUI() {
-    if (pendingFiles.length === 0) {
-      el.transcribeFileBtn.disabled = true;
-      el.fileInfo.textContent = '';
-      el.bulkQueueCount.style.display = 'none';
-    } else {
-      el.transcribeFileBtn.disabled = false;
-      el.fileInfo.textContent = `${pendingFiles.length} file${pendingFiles.length > 1 ? 's' : ''} selected`;
-      el.bulkQueueCount.textContent = pendingFiles.length + ' files';
-      el.bulkQueueCount.style.display = '';
-    }
+    state.ttsReady = true;
+    await setFlag("ttsReady", true);
+    setPackRow("packTts", true);
+    $("packMeter").classList.add("hidden");
+    showToast("This device is ready to work offline");
+  } catch (err) {
+    showToast(err.message || "Could not prepare offline pack");
+  } finally {
+    state.packing = false;
+    $("downloadPackBtn").disabled = state.ttsReady && state.whisperReady;
+    $("downloadPackBtn").textContent = state.ttsReady && state.whisperReady ? "Packed" : "Download pack";
+    updatePackChip();
+    render();
   }
+}
 
-  function addFiles(files) {
-    for (const f of files) {
-      if (f.type.startsWith('audio/') || f.name.match(/\.(mp3|wav|m4a|ogg|webm|flac|aac|opus)$/i)) {
-        pendingFiles.push(f);
-      }
+function setPackRow(id, ready, loading) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = ready ? "Ready" : loading ? "Loading" : "Needed";
+  el.className = ready ? "ready" : loading ? "loading" : "";
+}
+
+function typing(el) {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+function wire() {
+  $("newNoteBtn").onclick = () => createNote();
+  $("newConvoBtn").onclick = () => startConversation();
+  $("search").oninput = (e) => { state.query = e.target.value; render(); };
+  document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { state.filter = b.dataset.filter; document.querySelectorAll("[data-filter]").forEach((x) => x.classList.toggle("active", x === b)); render(); });
+  $("folderList").onclick = (e) => {
+    const b = e.target.closest("[data-folder]");
+    if (!b) return;
+    state.folderId = b.dataset.folder || null;
+    state.tag = null;
+    render();
+  };
+  $("tagList").onclick = (e) => {
+    const b = e.target.closest("[data-tag]");
+    if (!b) return;
+    state.tag = state.tag === b.dataset.tag ? null : b.dataset.tag;
+    render();
+  };
+  $("noteList").onclick = (e) => {
+    const b = e.target.closest("[data-id]");
+    if (b) {
+      state.selectedId = b.dataset.id;
+      const n = state.notes.find((x) => x.id === b.dataset.id);
+      state.pane = (n?.speakers || []).length ? "conversation" : "text";
+      state.tab = "note";
+      $("sidebar").classList.remove("open");
+      render();
     }
-    updateBulkUI();
-  }
-
-  el.uploadArea.addEventListener('click', () => el.audioFile.click());
-  el.uploadArea.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') el.audioFile.click(); });
-  el.audioFile.addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
-  el.uploadArea.addEventListener('dragover', e => { e.preventDefault(); el.uploadArea.classList.add('dragover'); });
-  el.uploadArea.addEventListener('dragleave', () => el.uploadArea.classList.remove('dragover'));
-  el.uploadArea.addEventListener('drop', e => {
-    e.preventDefault(); el.uploadArea.classList.remove('dragover');
-    addFiles(Array.from(e.dataTransfer.files));
-  });
-
-  el.transcribeFileBtn.addEventListener('click', () => {
-    if (!pendingFiles.length) return;
-    transcriptionQueue.setLanguage(localStorage.getItem('vn-lang') || 'auto');
-    for (const f of pendingFiles) {
-      transcriptionQueue.enqueue(f, f.name);
+  };
+  $("addFolderBtn").onclick = async () => {
+    const name = prompt("Notebook name");
+    if (!name?.trim()) return;
+    const f = { id: uid("f"), name: name.trim(), createdAt: Date.now() };
+    state.folders.push(f);
+    await saveFolder(f);
+    render();
+  };
+  $("settingsBtn").onclick = () => $("settingsModal").classList.add("open");
+  $("shortcutsBtn").onclick = () => $("shortcutsModal").classList.add("open");
+  $("commandBtn").onclick = () => openCommand();
+  $("menuBtn").onclick = () => { $("sidebar").classList.add("open"); state.tab = "library"; };
+  $("offlineReadyBtn").onclick = () => $("packModal").classList.add("open");
+  $("openPackBtn").onclick = () => { $("settingsModal").classList.remove("open"); $("packModal").classList.add("open"); };
+  $("downloadPackBtn").onclick = () => prepareOffline();
+  document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.classList.remove("open"); }));
+  $("themeSelect").onchange = (e) => applyTheme(e.target.value);
+  $("fontSizeSlider").oninput = (e) => applyFontScale(e.target.value);
+  $("languageSelector").onchange = (e) => { state.settings.language = e.target.value; localStorage.setItem("vn-lang", e.target.value); };
+  $("engineSelector").onchange = async (e) => {
+    state.settings.engine = e.target.value;
+    if (e.target.value !== "manual" && window.__mgr) {
+      try { await window.__mgr.setEngine(e.target.value); showToast("Engine switched"); } catch (err) { showToast(err.message); }
     }
-    showToast(`${pendingFiles.length} file(s) queued for transcription ⚡`, 'info');
-    pendingFiles = [];
-    updateBulkUI();
+  };
+  $("autoTitle").onchange = (e) => state.settings.autoTitle = e.target.checked;
+  $("autoSummarize").onchange = (e) => state.settings.autoSummarize = e.target.checked;
+  $("autoDiarize").onchange = (e) => state.settings.autoDiarize = e.target.checked;
+  $("dictationPunctuation").onchange = (e) => state.settings.dictationPunctuation = e.target.checked;
+  $("speakerCount").onchange = (e) => state.settings.speakerCount = e.target.value;
+  $("ttsVoice").onchange = (e) => state.settings.ttsVoiceId = e.target.value;
+  $("sidebarRecordBtn").onclick = () => toggleRec();
+  $("tabRecord").onclick = () => toggleRec();
+  $("tabLibrary").onclick = () => { $("sidebar").classList.add("open"); state.tab = "library"; $("tabLibrary").classList.add("active"); $("tabNote").classList.remove("active"); };
+  $("tabNote").onclick = () => { $("sidebar").classList.remove("open"); state.tab = "note"; $("tabNote").classList.add("active"); $("tabLibrary").classList.remove("active"); };
+  $("exportBackupBtn").onclick = () => downloadFile(`voice-notes-backup.json`, JSON.stringify({ version: 2, notes: state.notes, folders: state.folders }, null, 2), "application/json");
+  $("importBackupBtn").onclick = () => $("backupFile").click();
+  $("backupFile").onchange = async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      const incoming = (data.notes || data).map(withSpeakers);
+      for (const n of incoming) { n.id = n.id || uid(); await saveNote(n); }
+      state.notes = [...incoming, ...state.notes];
+      render();
+      showToast(`Imported ${incoming.length} notes`);
+    } catch { showToast("Import failed"); }
+    e.target.value = "";
+  };
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("audio/") || /\.(mp3|wav|m4a|ogg|webm)$/i.test(f.name));
+    files.forEach((f) => importAudio(f));
   });
-
-  // ── Copy & Export ─────────────────────────────────────────────────────
-  el.copyTranscriptBtn.addEventListener('click', () => {
-    if (!el.transcript.value) return;
-    navigator.clipboard.writeText(el.transcript.value);
-    showToast('Transcript copied!', 'success');
-  });
-
-  el.copySummaryBtn.addEventListener('click', () => {
-    const txt = el.summary.textContent;
-    if (!txt) return;
-    navigator.clipboard.writeText(txt);
-    showToast('Summary copied!', 'success');
-  });
-
-  el.exportBtn.addEventListener('click', () => {
-    const open = el.exportMenu.classList.toggle('open');
-    el.exportBtn.setAttribute('aria-expanded', open);
-    if (open) {
-      // Use position:fixed calculated from the button rect to escape backdrop-filter stacking context
-      const rect = el.exportBtn.getBoundingClientRect();
-      el.exportMenu.style.position = 'fixed';
-      el.exportMenu.style.top = (rect.bottom + 6) + 'px';
-      // Align right edge of menu to right edge of button
-      el.exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
-      el.exportMenu.style.left = 'auto';
-      el.exportMenu.style.minWidth = Math.max(160, rect.width) + 'px';
-    }
-  });
-  document.addEventListener('click', e => {
-    if (!el.exportBtn.contains(e.target) && !el.exportMenu.contains(e.target)) {
-      el.exportMenu.classList.remove('open');
-      el.exportBtn.setAttribute('aria-expanded', 'false');
-    }
-  });
-  window.addEventListener('scroll', () => {
-    if (el.exportMenu.classList.contains('open')) {
-      const rect = el.exportBtn.getBoundingClientRect();
-      el.exportMenu.style.top = (rect.bottom + 6) + 'px';
-      el.exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
-    }
-  }, { passive: true });
-
-  const makeCurrentNote = () => ({
-    id: state.currentNote?.id,
-    title: el.sessionTitle.value || 'Untitled Note',
-    transcript: el.transcript.value,
-    summary: el.summary.textContent,
-    date: state.currentNote?.date || new Date().toISOString(),
-    engine: manager.getCurrentEngineInfo()?.id || 'unknown',
-  });
-
-  el.exportTxt.addEventListener('click', () => { exportNote(makeCurrentNote(), 'txt'); el.exportMenu.classList.remove('open'); });
-  el.exportMd.addEventListener('click',  () => { exportNote(makeCurrentNote(), 'md');  el.exportMenu.classList.remove('open'); });
-  el.exportJson.addEventListener('click',() => { exportNote(makeCurrentNote(), 'json');el.exportMenu.classList.remove('open'); });
-
-  // ── Summarizer ────────────────────────────────────────────────────────
-  let summarizerWorker = null;
-
-  el.sendToLLMBtn.addEventListener('click', () => {
-    const text = el.transcript.value.trim();
-    if (!text) { showToast('No transcript to summarize.', 'warning'); return; }
-    el.sendToLLMBtn.disabled = true;
-    updateProgress(true, 0, 'Warming up offline summarizer…');
-
-    if (!summarizerWorker) {
-      try { summarizerWorker = new Worker('engines/offline-summarizer-worker.js', { type: 'module' }); }
-      catch (e) { updateProgress(false); showToast('Could not start summarizer.', 'error'); el.sendToLLMBtn.disabled = false; return; }
-    }
-
-    const msgId = Date.now().toString();
-    const wordCount = text.split(/\s+/).length;
-    const maxLen = Math.min(300, Math.max(50, Math.floor(wordCount * 0.4)));
-    const minLen = Math.min(100, Math.max(10, Math.floor(wordCount * 0.1)));
-
-    const handler = e => {
-      if (e.data.id !== msgId) return;
-      if (e.data.status === 'progress') {
-        updateModelStatus('summarizer', 'progress', e.data.data);
-        if (e.data.data?.status === 'progress' && e.data.data?.progress !== undefined) updateProgress(true, e.data.data.progress, `Downloading model: ${e.data.data.file}…`);
-        else if (e.data.data?.status === 'ready') {
-          updateProgress(true, 100, 'Model ready. Summarizing…');
-          updateModelStatus('summarizer', 'ready');
-        }
-      } else if (e.data.status === 'loading') {
-        updateModelStatus('summarizer', 'loading');
-      } else if (e.data.status === 'processing') {
-        updateProgress(true, null, 'Generating summary offline…');
-      } else if (e.data.status === 'success') {
-        summarizerWorker.removeEventListener('message', handler);
-        updateProgress(false);
-        el.summary.innerHTML = `<p>${e.data.summary.replace(/\n/g, '<br>')}</p>`;
-        el.sendToLLMBtn.disabled = false;
-        const engineId = manager.getCurrentEngineInfo()?.id || 'unknown';
-        saveNote({
-          date: new Date().toISOString(),
-          title: el.sessionTitle.value || 'Note ' + new Date().toLocaleTimeString(),
-          transcript: text,
-          summary: e.data.summary,
-          engine: engineId,
-        }).then(() => { showToast('Note saved to history!', 'success'); renderHistory(); });
-      } else if (e.data.status === 'error') {
-        summarizerWorker.removeEventListener('message', handler);
-        updateProgress(false);
-        showToast(`Summarizer error: ${e.data.error}`, 'error');
-        el.sendToLLMBtn.disabled = false;
-      }
-    };
-
-    summarizerWorker.addEventListener('message', handler);
-    summarizerWorker.postMessage({ action: 'summarize', text, max_length: maxLen, min_length: minLen, id: msgId });
-  });
-
-  // ── Preload ───────────────────────────────────────────────────────────
-  el.preloadModelsBtn.addEventListener('click', () => {
-    el.preloadModelsBtn.disabled = true;
-    showToast('Starting model preloading...', 'info');
-
-    // Preload Summarizer
-    if (!summarizerWorker) {
-      summarizerWorker = new Worker('engines/offline-summarizer-worker.js', { type: 'module' });
-      summarizerWorker.addEventListener('message', e => {
-        if (e.data.status === 'progress') updateModelStatus('summarizer', 'progress', e.data.data);
-        if (e.data.status === 'loading') updateModelStatus('summarizer', 'loading');
-        if (e.data.status === 'preload_done') updateModelStatus('summarizer', 'ready');
-      });
-    }
-    summarizerWorker.postMessage({ action: 'preload', id: 'preload-' + Date.now() });
-
-    // Preload Whisper (via engine manager)
-    manager.preloadEngine('whisper', (status, data) => {
-        updateModelStatus('whisper', status === 'loading' ? 'loading' : 'progress', data);
-        if (status === 'ready') updateModelStatus('whisper', 'ready');
-    }).catch(err => {
-        console.warn('Manager preload failed, trying fallback...', err);
-        // Direct worker fallback if engine manager fails
-        const w = new Worker('engines/whisper-worker.js', { type: 'module' });
-        w.onmessage = e => {
-            if (e.data.status === 'progress') updateModelStatus('whisper', 'progress', e.data.data);
-            if (e.data.status === 'loading') updateModelStatus('whisper', 'loading');
-            if (e.data.status === 'preload_done' || e.data.status === 'ready') {
-                updateModelStatus('whisper', 'ready');
-                w.terminate();
-            }
-        };
-        w.postMessage({ action: 'preload', id: 'preload-whisper' });
-    });
-
-    setTimeout(() => { el.preloadModelsBtn.disabled = false; }, 2000);
-  });
-
-  // ── History ───────────────────────────────────────────────────────────
-  let allNotes = [];
-
-  async function renderHistory() {
-    allNotes = await loadAllNotes();
-    applyHistoryFilter();
-  }
-
-  function applyHistoryFilter() {
-    const q = el.historySearch.value.toLowerCase();
-    const sort = el.historySort.value;
-    let notes = allNotes.filter(n =>
-      (n.title || '').toLowerCase().includes(q) ||
-      (n.transcript || '').toLowerCase().includes(q)
-    );
-    if (sort === 'date-desc') notes.sort((a, b) => b.date.localeCompare(a.date));
-    else if (sort === 'date-asc') notes.sort((a, b) => a.date.localeCompare(b.date));
-    else if (sort === 'title-asc') notes.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-    renderHistoryCards(notes);
-  }
-
-  function renderHistoryCards(notes) {
-    if (!notes.length) {
-      el.historyGrid.innerHTML = '<div class="history-empty">No notes yet. Record something!</div>';
-      return;
-    }
-    el.historyGrid.innerHTML = notes.map(note => {
-      const date = new Date(note.date).toLocaleDateString() + ' ' +
-        new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const words = note.transcript ? note.transcript.trim().split(/\s+/).filter(Boolean).length : 0;
-      const safe = (s) => (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `
-        <div class="history-card" role="listitem" data-id="${note.id}">
-          <div class="history-card-info">
-            <div class="history-card-title" title="Click to load" data-id="${note.id}">${safe(note.title || 'Untitled')}</div>
-            <div class="history-card-meta">
-              <span class="history-card-date">${date}</span>
-              ${note.engine ? `<span class="engine-badge">${note.engine}</span>` : ''}
-              <span class="words-badge">${words} words</span>
-            </div>
-          </div>
-          <div class="history-card-actions">
-            <button class="btn-ghost load-note-btn" data-id="${note.id}" aria-label="Load note">Load</button>
-            <button class="btn-ghost export-note-btn" data-id="${note.id}" aria-label="Export note">⬇️</button>
-            <button class="btn-danger delete-note-btn" data-id="${note.id}" aria-label="Delete note">🗑️</button>
-          </div>
-        </div>`;
-    }).join('');
-
-    el.historyGrid.querySelectorAll('.load-note-btn, .history-card-title').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        const id = Number(e.target.dataset.id);
-        const note = allNotes.find(n => n.id === id);
-        if (!note) return;
-        state.currentNote = note;
-        el.sessionTitle.value = note.title || '';
-        el.transcript.value = note.transcript || '';
-        state.transcriptText = note.transcript || '';
-        el.summary.innerHTML = note.summary ? `<p>${note.summary.replace(/\n/g, '<br>')}</p>` : '';
-        switchTab('text');
-        updateWordCount();
-        showToast(`Loaded: ${note.title}`, 'info');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-    });
-
-    el.historyGrid.querySelectorAll('.delete-note-btn').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        const id = Number(e.target.dataset.id);
-        if (!confirm('Delete this note?')) return;
-        await deleteNote(id);
-        showToast('Note deleted', 'success');
-        renderHistory();
-      });
-    });
-
-    el.historyGrid.querySelectorAll('.export-note-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        const id = Number(e.target.dataset.id);
-        const note = allNotes.find(n => n.id === id);
-        if (note) exportNote(note, 'md');
-      });
-    });
-  }
-
-  el.historySearch.addEventListener('input', applyHistoryFilter);
-  el.historySort.addEventListener('change', applyHistoryFilter);
-  el.clearAllBtn.addEventListener('click', async () => {
-    if (!confirm('Delete ALL notes? This cannot be undone.')) return;
-    await clearAllNotes();
-    showToast('All notes cleared', 'success');
-    renderHistory();
-  });
-
-  renderHistory();
-
-  // ── Concurrency Setting ───────────────────────────────────────────────
-  if (el.concurrencySelect && el.concurrencyLabel) {
-    const stored = parseInt(localStorage.getItem('vn-max-workers') || MAX_WORKERS, 10);
-    el.concurrencySelect.value = String(Math.min(3, Math.max(1, stored)));
-    el.concurrencyLabel.textContent = el.concurrencySelect.value;
-    el.concurrencySelect.addEventListener('change', () => {
-      localStorage.setItem('vn-max-workers', el.concurrencySelect.value);
-      el.concurrencyLabel.textContent = el.concurrencySelect.value;
-      showToast('Concurrency updated — takes effect on next queue run', 'info');
-    });
-  }
-
-  // ── Recording Inbox (Queue UI) ────────────────────────────────────────
-  function renderInbox(items) {
-    const hasItems = items.length > 0;
-    el.recordingInbox.style.display = hasItems ? 'block' : 'none';
-    const active = items.filter(i => ['queued','decoding','loading','transcribing'].includes(i.status)).length;
-    el.inboxWorkerBadge.textContent = `${Math.min(active, MAX_WORKERS)}/${MAX_WORKERS} workers`;
-
-    if (!hasItems) { el.inboxList.innerHTML = ''; return; }
-
-    el.inboxList.innerHTML = items.slice().reverse().map(item => {
-      const ago = item.doneAt
-        ? `Done ${Math.round((Date.now() - item.doneAt) / 1000)}s ago`
-        : item.status === 'queued' ? 'Waiting…'
-        : item.progressLabel || item.status;
-      const pct = item.progress || 0;
-      const isActive = ['decoding','loading','transcribing'].includes(item.status);
-      return `<div class="inbox-item" data-id="${item.id}">
-        <div>
-          <div class="inbox-item-name">${item.name}</div>
-          <div class="inbox-item-meta">${ago}</div>
-        </div>
-        <div class="inbox-item-actions">
-          <span class="inbox-status-badge" data-status="${item.status}">${item.status}</span>
-          ${item.status === 'done' ? `<button class="btn-ghost load-inbox-btn" data-id="${item.id}">Load</button>` : ''}
-          ${item.status !== 'decoding' && item.status !== 'transcribing' && item.status !== 'loading'
-            ? `<button class="btn-danger remove-inbox-btn" data-id="${item.id}">🗑️</button>` : ''}
-        </div>
-        ${isActive ? `<div class="inbox-progress-wrap">
-          <div class="inbox-progress-label">${item.progressLabel || '…'}</div>
-          <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
-        </div>` : ''}
-      </div>`;
-    }).join('');
-
-    el.inboxList.querySelectorAll('.load-inbox-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        const id = Number(e.target.dataset.id);
-        const item = transcriptionQueue.getItem(id);
-        if (!item || !item.transcript) return;
-        el.transcript.value = item.transcript;
-        state.transcriptText = item.transcript;
-        if (item.chunks?.length) { state.timedWords = item.chunks; renderTimedTranscript(item.chunks); }
-        el.sessionTitle.value = item.name || '';
-        updateWordCount();
-        showToast(`Loaded: ${item.name}`, 'info');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-    });
-    el.inboxList.querySelectorAll('.remove-inbox-btn').forEach(btn => {
-      btn.addEventListener('click', e => transcriptionQueue.remove(Number(e.target.dataset.id)));
-    });
-  }
-
-  transcriptionQueue.addEventListener('change', e => renderInbox(e.detail));
-  transcriptionQueue.addEventListener('itemdone', e => {
+  transcriptionQueue.addEventListener("itemdone", async (e) => {
     const item = e.detail;
     if (!item.transcript) return;
-    saveNote({
-      date: new Date(item.doneAt).toISOString(),
-      title: item.name || 'Recording',
-      transcript: item.transcript,
-      summary: '',
-      engine: 'whisper',
-    }).then(() => { renderHistory(); showToast(`✅ Saved: "${item.name}"`, 'success'); });
+    const note = await createNote({ title: item.name, transcript: item.transcript, engine: "whisper", summary: state.settings.autoSummarize ? summarizeLocal(item.transcript) : "" });
+    showToast(`Transcribed “${note.title}”`);
+    if (state.settings.autoDiarize && note.audioId) void diarizeNote(note.id);
   });
-
-  if (el.clearInboxBtn) {
-    el.clearInboxBtn.addEventListener('click', () => transcriptionQueue.clearDone());
-  }
-
-  // ── TTS (Kokoro-82M) ──────────────────────────────────────────────────
-  let ttsWorker = null;
-  let ttsAudioCtx = null;
-  let ttsSource = null;
-  let ttsSpeaking = false;
-  let lastTTSAudioData = null;
-  let lastTTSSampleRate = null;
-
-  function updateKokoroStatus(status, data) {
-    if (!el.kokoroReadiness) return;
-    if (status === 'loading') {
-      el.kokoroReadiness.textContent = 'Initializing…'; el.kokoroReadiness.dataset.state = 'downloading';
-    } else if (status === 'progress') {
-      el.kokoroProgressArea.style.display = 'block';
-      el.kokoroReadiness.textContent = 'Downloading…'; el.kokoroReadiness.dataset.state = 'downloading';
-      if (data?.file) el.kokoroProgressFile.textContent = `File: ${data.file}`;
-      if (data?.progress != null) el.kokoroProgressBar.style.width = `${data.progress}%`;
-    } else if (status === 'ready') {
-      el.kokoroReadiness.textContent = 'Ready'; el.kokoroReadiness.dataset.state = 'ready';
-      el.kokoroProgressArea.style.display = 'none';
-    } else if (status === 'error') {
-      el.kokoroReadiness.textContent = 'Error'; el.kokoroReadiness.dataset.state = 'error';
-    }
-  }
-
-  function setTTSProgress(show, label = '', pct = null) {
-    el.ttsProgress.style.display = show ? 'flex' : 'none';
-    if (label) el.ttsProgressLabel.textContent = label;
-    if (pct != null) { el.ttsProgressFill.style.width = pct + '%'; el.ttsProgressFill.style.animation = 'none'; }
-    else if (show) { el.ttsProgressFill.style.width = '100%'; el.ttsProgressFill.style.animation = 'pulse 1.5s infinite'; }
-  }
-
-  function initTTSWorker() {
-    if (ttsWorker) return;
-    ttsWorker = new Worker('engines/tts-worker.js', { type: 'module' });
-    ttsWorker.postMessage({ action: 'list_voices', id: 'voices' });
-    ttsWorker.onmessage = e => {
-      const { status, id } = e.data;
-      if (status === 'voices') {
-        el.ttsVoiceSelect.innerHTML = e.data.voices.map(v =>
-          `<option value="${v.id}">${v.name}</option>`
-        ).join('');
-        return;
-      }
-      if (status === 'loading') { setTTSProgress(true, 'Loading Kokoro model…'); updateKokoroStatus('loading'); }
-      else if (status === 'progress') {
-        const d = e.data.data || {};
-        setTTSProgress(true, `Downloading: ${d.file || 'kokoro'} (${Math.round(d.progress || 0)}%)`, d.progress);
-        updateKokoroStatus('progress', d);
-      } else if (status === 'ready') { setTTSProgress(false); updateKokoroStatus('ready'); }
-      else if (status === 'generating') { setTTSProgress(true, 'Generating speech…'); }
-      else if (status === 'chunk') {
-        setTTSProgress(true, `Generating… ${e.data.current}/${e.data.total}`, Math.round((e.data.current / e.data.total) * 100));
-      } else if (status === 'success') {
-        setTTSProgress(false);
-        const { audio, sampleRate } = e.data;
-        lastTTSAudioData = audio;
-        lastTTSSampleRate = sampleRate;
-        el.ttsDownloadBtn.style.display = '';
-        ttsAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
-        const buf = ttsAudioCtx.createBuffer(1, audio.length, sampleRate);
-        buf.copyToChannel(audio, 0);
-        ttsSource = ttsAudioCtx.createBufferSource();
-        ttsSource.buffer = buf;
-        ttsSource.connect(ttsAudioCtx.destination);
-        ttsSource.onended = () => { ttsSpeaking = false; el.ttsSpeakBtn.classList.remove('speaking'); el.ttsStopBtn.style.display = 'none'; el.ttsSpeakBtn.disabled = false; };
-        ttsSource.start();
-        ttsSpeaking = true;
-        el.ttsSpeakBtn.classList.add('speaking');
-        el.ttsStopBtn.style.display = '';
-      } else if (status === 'error') {
-        setTTSProgress(false);
-        showToast(`TTS error: ${e.data.error}`, 'error');
-        el.ttsSpeakBtn.disabled = false;
-        el.ttsSpeakIcon.textContent = '🔊';
-        el.ttsSpeakLabel.textContent = 'Speak';
-        updateKokoroStatus('error');
-      }
-    };
-  }
-
-  el.ttsSpeakBtn.addEventListener('click', () => {
-    const text = window.getSelection()?.toString().trim() || el.transcript.value.trim();
-    if (!text) { showToast('No text to speak — add a transcript first.', 'warning'); return; }
-    initTTSWorker();
-    const voice = el.ttsVoiceSelect.value || 'af_heart';
-    const speed = parseFloat(el.ttsSpeedSlider.value) || 1.0;
-    el.ttsSpeakBtn.disabled = true;
-    el.ttsDownloadBtn.style.display = 'none';
-    el.ttsSpeakIcon.textContent = '⏳';
-    el.ttsSpeakLabel.textContent = 'Speaking…';
-    ttsWorker.postMessage({ action: 'generate', text, voice, speed, id: 'tts-' + Date.now() });
-  });
-
-  el.ttsStopBtn.addEventListener('click', () => {
-    if (ttsSource) { try { ttsSource.stop(); } catch (_) {} ttsSource = null; }
-    ttsSpeaking = false;
-    el.ttsSpeakBtn.classList.remove('speaking');
-    el.ttsStopBtn.style.display = 'none';
-    el.ttsSpeakBtn.disabled = false;
-    el.ttsSpeakIcon.textContent = '🔊';
-    el.ttsSpeakLabel.textContent = 'Speak';
-    setTTSProgress(false);
-  });
-
-  el.ttsDownloadBtn.addEventListener('click', () => {
-    if (!lastTTSAudioData || !lastTTSSampleRate) {
-      showToast('No audio generated yet.', 'warning');
-      return;
-    }
-    const filename = `tts-audio-${new Date().getTime()}.wav`;
-    const wavView = encodeWAV(lastTTSAudioData, lastTTSSampleRate);
-    downloadFile(filename, wavView, 'audio/wav');
-  });
-
-  el.ttsSpeedSlider.addEventListener('input', () => {
-    el.ttsSpeedValue.textContent = parseFloat(el.ttsSpeedSlider.value).toFixed(1) + '×';
-  });
-
-  // Ctrl+Shift+S → speak
-  document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.shiftKey && e.key === 'S') { e.preventDefault(); el.ttsSpeakBtn.click(); }
-  });
-
-  // "Preload All" also warms up the Kokoro TTS model
-  el.preloadModelsBtn.addEventListener('click', () => {
-    initTTSWorker();
-    ttsWorker.postMessage({ action: 'preload', id: 'kokoro-preload-' + Date.now() });
-  });
+  window.addEventListener("keydown", onKey);
 }
 
+function onKey(e) {
+  const meta = e.metaKey || e.ctrlKey;
+  if (e.key === "Escape") document.querySelectorAll(".modal.open").forEach((m) => m.classList.remove("open"));
+  if (meta && e.key.toLowerCase() === "k") { e.preventDefault(); openCommand(); }
+  if (meta && e.key === ",") { e.preventDefault(); $("settingsModal").classList.add("open"); }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); toggleTheme(); }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "c") {
+    e.preventDefault();
+    const n = state.notes.find((x) => x.id === state.selectedId);
+    if (n?.transcript) { navigator.clipboard.writeText(n.transcript); showToast("Copied"); }
+  }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "m") { e.preventDefault(); if (state.selectedId) doSummary(state.selectedId); }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    const n = state.notes.find((x) => x.id === state.selectedId);
+    if (n) speakNote(n);
+  }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); $("packModal").classList.add("open"); }
+  if (typing(e.target)) return;
+  if (e.key === " " && !e.repeat) { e.preventDefault(); toggleRec(); }
+  if (e.key.toLowerCase() === "n") { e.preventDefault(); createNote(); }
+  if (e.key.toLowerCase() === "p" && state.rec !== "idle") { e.preventDefault(); state.rec === "recording" ? pauseRec() : resumeRec(); }
+}
+
+function openCommand() {
+  $("commandModal").classList.add("open");
+  const input = $("commandInput");
+  const list = $("commandList");
+  input.value = "";
+  const draw = () => {
+    const q = input.value.toLowerCase();
+    const actions = [
+      { label: "New note", run: () => createNote() },
+      { label: "New conversation", run: () => startConversation() },
+      { label: "Start recording", run: () => startRec() },
+      { label: "Offline Ready", run: () => $("packModal").classList.add("open") },
+      { label: "Identify speakers", run: () => state.selectedId && diarizeNote(state.selectedId) },
+      { label: "Settings", run: () => $("settingsModal").classList.add("open") },
+      { label: "Toggle theme", run: () => toggleTheme() },
+    ].filter((a) => a.label.toLowerCase().includes(q));
+    const notes = visible().filter((n) => n.title.toLowerCase().includes(q)).slice(0, 8);
+    list.innerHTML = actions.map((a, i) => `<li><button class="${i === 0 ? "active" : ""}" data-run="a${i}">${esc(a.label)}</button></li>`).join("")
+      + notes.map((n) => `<li><button data-note="${n.id}">${esc(n.title)}</button></li>`).join("");
+    list.onclick = (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.dataset.note) state.selectedId = b.dataset.note;
+      else actions[Number(b.dataset.run.slice(1))]?.run();
+      $("commandModal").classList.remove("open");
+      render();
+    };
+  };
+  input.oninput = draw;
+  draw();
+  input.focus();
+}
+
+function toggleRec() {
+  if (state.rec === "idle") startRec();
+  else stopRec();
+}
+
+async function startRec() {
+  if (state.rec !== "idle") return;
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch { showToast("Microphone permission was denied"); return; }
+  recMime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  recChunks = []; recFinal = ""; recAcc = 0; recStarted = Date.now();
+  let note = state.notes.find((n) => n.id === state.selectedId);
+  if (!note || note.transcript || note.audioId) note = await createNote({ title: "Recording", engine: state.settings.engine });
+  recNoteId = note.id;
+  recRecorder = new MediaRecorder(recStream, recMime ? { mimeType: recMime } : undefined);
+  recRecorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+  recRecorder.start(1000);
+  const Ctor = speechCtor();
+  if (Ctor && state.settings.engine !== "whisper" && navigator.onLine) {
+    recSpeech = new Ctor();
+    recSpeech.continuous = true;
+    recSpeech.interimResults = true;
+    recSpeech.lang = state.settings.language;
+    recSpeech.onresult = (ev) => {
+      let fin = "", inter = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) fin += ev.results[i][0].transcript;
+        else inter += ev.results[i][0].transcript;
+      }
+      if (fin) {
+        recFinal = `${recFinal} ${state.settings.dictationPunctuation ? applyDictationPunctuation(fin) : fin}`.replace(/\s+/g, " ").trim();
+        patch(recNoteId, { transcript: recFinal, title: state.settings.autoTitle ? titleFromTranscript(recFinal) : undefined });
+      }
+      state.recInterim = inter;
+    };
+    recSpeech.onend = () => { if (state.rec === "recording") try { recSpeech.start(); } catch {} };
+    try { recSpeech.start(); } catch {}
+  } else if (!navigator.onLine) {
+    showToast("Offline. Audio is saved, and Whisper will transcribe it after you stop.");
+  }
+  recTimer = setInterval(() => { state.recMs = recAcc + Date.now() - recStarted; const t = document.querySelector(".timer"); if (t) t.textContent = formatDuration(state.recMs); }, 200);
+  state.rec = "recording";
+  $("fabRec").textContent = "■";
+  $("sidebar").classList.remove("open");
+  render();
+  const canvas = $("wave");
+  if (canvas) new WaveformVisualizer(canvas).start(recStream);
+}
+
+function pauseRec() {
+  recRecorder?.pause();
+  try { recSpeech?.stop(); } catch {}
+  recAcc += Date.now() - recStarted;
+  state.rec = "paused";
+}
+function resumeRec() {
+  recRecorder?.resume();
+  recStarted = Date.now();
+  state.rec = "recording";
+}
+
+async function stopRec() {
+  try { recSpeech?.stop(); } catch {}
+  recSpeech = null;
+  clearInterval(recTimer);
+  const duration = state.rec === "recording" ? recAcc + Date.now() - recStarted : recAcc;
+  const blob = await new Promise((resolve) => {
+    if (!recRecorder) return resolve(null);
+    recRecorder.onstop = () => resolve(recChunks.length ? new Blob(recChunks, { type: recMime || "audio/webm" }) : null);
+    try { recRecorder.stop(); } catch { resolve(null); }
+  });
+  recStream?.getTracks().forEach((t) => t.stop());
+  recStream = null; recRecorder = null; recChunks = [];
+  state.rec = "idle"; state.recMs = duration; $("fabRec").textContent = "●";
+  if (!recNoteId) return;
+  const p = { durationMs: duration };
+  if (recFinal) {
+    p.transcript = recFinal;
+    if (state.settings.autoTitle) p.title = titleFromTranscript(recFinal);
+  }
+  if (blob?.size) { await putAudio(recNoteId, blob, blob.type); p.audioId = recNoteId; p.audioMime = blob.type; }
+  await patch(recNoteId, p);
+  const note = state.notes.find((n) => n.id === recNoteId);
+  if (state.settings.autoSummarize && note?.transcript) await doSummary(recNoteId);
+  const useWhisper = blob && (!recFinal || state.settings.engine === "whisper" || !navigator.onLine);
+  if (useWhisper && blob) {
+    transcriptionQueue.setLanguage(state.settings.language.startsWith("en") ? "en" : "auto");
+    transcriptionQueue.enqueue(blob, note?.title || "Recording");
+  } else {
+    showToast("Saved to library");
+    if (blob && state.settings.autoDiarize) void diarizeNote(recNoteId);
+  }
+  recNoteId = null;
+}
+
+async function importAudio(file) {
+  const note = await createNote({ title: file.name.replace(/\.[^.]+$/, ""), engine: "upload" });
+  await putAudio(note.id, file, file.type);
+  await patch(note.id, { audioId: note.id, audioMime: file.type });
+  transcriptionQueue.setLanguage("auto");
+  transcriptionQueue.enqueue(file, file.name);
+  showToast("Queued for transcription");
+}
+
+function esc(s) {
+  return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function escAttr(s) { return esc(s).replace(/'/g, "&#39;"); }
