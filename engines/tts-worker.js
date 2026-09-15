@@ -1,4 +1,6 @@
-// Kokoro-82M on-device TTS. WebGPU fp16 when available, WASM q8 otherwise.
+// Kokoro-82M on-device TTS. WebGPU fp32 when available, WASM q8 otherwise.
+// WebGPU must run fp32: at fp16 or q8 the GPU kernels return noise instead of speech, which is
+// the unintelligible audio that shipped on 2026-09-14.
 // No MMS fallback — that voice is robotic. The page uses system speech if this fails.
 import { env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
 
@@ -35,7 +37,7 @@ class NeuralTts {
     try {
       if (typeof navigator !== "undefined" && navigator.gpu) {
         const adapter = await navigator.gpu.requestAdapter();
-        if (adapter) return { device: "webgpu", dtype: "fp16" };
+        if (adapter) return { device: "webgpu", dtype: "fp32" };
       }
     } catch {
       /* wasm */
@@ -59,15 +61,7 @@ class NeuralTts {
     try {
       this.kokoro = await load(runtime.device, runtime.dtype);
     } catch (err) {
-      if (runtime.device === "webgpu" && runtime.dtype !== "q8") {
-        try {
-          this.dtype = "q8";
-          this.kokoro = await load("webgpu", "q8");
-          return "kokoro";
-        } catch {
-          /* wasm */
-        }
-      }
+      // No quantized WebGPU retry: it loads, then speaks noise. WASM q8 is the fallback.
       if (runtime.device !== "wasm") {
         this.device = "wasm";
         this.dtype = "q8";

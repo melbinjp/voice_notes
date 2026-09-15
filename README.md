@@ -12,7 +12,9 @@ The capture surface is a **studio**, not a stack of cards.
 - Pause / resume recording, live waveform, Space to capture
 - Audio stored with each note in IndexedDB
 - Instant on-device summaries (extractive), with no 300 MB download required
-- Whisper tiny for high-accuracy offline transcription
+- Whisper tiny for high-accuracy offline transcription, in any of the 99 languages the model knows. The language list is read from the model, not kept in the app.
+- **Play along**: the transcript highlights each word as the recording plays. Click a word to play from it, double-click to correct it, and the timing stays.
+- **Subtitles**: export SRT or VTT, with speaker names when a note has speakers
 - Live captions via Web Speech when the browser supports them
 - **Speaker diarization**: split a take into named turns, or parse `Name:` lines
 - **Write a conversation**: Start, type, Enter. Up to four people. Play dialogue.
@@ -75,7 +77,7 @@ A local server is required for workers, microphone, and IndexedDB in some browse
 
 ## GitHub Pages
 
-Settings → Pages → `main` → `/ (root)`.
+In the repository settings, open Pages and publish from the `main` branch, folder `/ (root)`.
 
 ## License
 
