@@ -267,7 +267,7 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.03em; text-wra
 .convo-row { display: flex; }
 .convo-row.them { justify-content: flex-end; }
 .convo-bubble {
-  max-width: 85%; border: 1px solid var(--border); background: var(--surface);
+  width: min(34rem, 85%); border: 1px solid var(--border); background: var(--surface);
   border-radius: 16px; padding: 8px 12px; border-left-width: 3px;
 }
 .convo-row.them .convo-bubble { border-left-width: 1px; }
@@ -276,7 +276,14 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.03em; text-wra
 .convo-bubble textarea {
   width: 100%; border: 0; background: transparent; color: var(--fg); outline: none;
   resize: none; font: inherit; font-size: 0.875rem; line-height: 1.5;
+  field-sizing: content; min-height: 1.5em; overflow: hidden; display: block;
 }
+.sidebar-foot {
+  margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px;
+}
+.sidebar-foot a { color: var(--subtle); text-decoration: none; }
+.sidebar-foot a:hover { color: var(--fg); text-decoration: underline; }
 .convo-compose {
   display: flex; align-items: center; gap: 8px; margin-top: 16px;
   border: 1px solid var(--border); background: var(--elevated);
@@ -289,7 +296,7 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.03em; text-wra
   display: block; margin-top: 10px; border: 0; background: transparent; color: var(--subtle);
   font-size: 11px; text-decoration: underline; text-underline-offset: 2px;
 }
-@media (min-width: 560px) { .convo-bubble { max-width: 72%; } }
+@media (min-width: 560px) { .convo-bubble { width: min(34rem, 72%); } }
 
 .modal {
   position: fixed; inset: 0; background: color-mix(in oklab, var(--bg) 70%, transparent);

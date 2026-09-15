@@ -246,7 +246,7 @@ function conversationHtml(note) {
       <input id="convoDraft" placeholder="Say as ${escAttr(active.name)}" aria-label="Line as ${escAttr(active.name)}" autocomplete="off" />
       <button class="btn btn-sm" type="submit">Enter</button>
     </form>
-    ${state.ttsReady ? "" : `<button type="button" class="pack-hint" id="needPack2">Natural voices after Offline Ready — Heart and Fenrir, not the system robot.</button>`}
+    ${state.ttsReady ? "" : `<button type="button" class="pack-hint" id="needPack2">Natural voices after Offline Ready: Heart and Fenrir, not the system robot.</button>`}
   </div>`;
 }
 
@@ -342,6 +342,9 @@ function renderEditor() {
     const draft = $("convoDraft");
     const line = draft?.value.trim();
     if (!line) return;
+    // Cleared before the save, so the next line starts empty. Without this every
+    // line carried all the earlier ones with it.
+    draft.value = "";
     const who = state.convoWho || note.speakers[0]?.id;
     if (who) void addTurn(note.id, who, line);
   });
@@ -386,7 +389,13 @@ function renderEditor() {
   }));
   root.querySelectorAll("[data-rmsp]").forEach((b) => b.addEventListener("click", () => removeSpeaker(note.id, b.dataset.rmsp)));
   root.querySelectorAll("[data-rmturn]").forEach((b) => b.addEventListener("click", () => removeTurn(note.id, Number(b.dataset.rmturn))));
-  root.querySelectorAll("[data-turn]").forEach((ta) => ta.addEventListener("change", (e) => updateTurn(note.id, Number(e.target.dataset.turn), e.target.value)));
+  root.querySelectorAll("[data-turn]").forEach((ta) => {
+    // A line is as tall as its text, so nothing is cut off mid-sentence.
+    const fit = () => { ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`; };
+    requestAnimationFrame(fit);
+    ta.addEventListener("input", fit);
+    ta.addEventListener("change", (e) => updateTurn(note.id, Number(e.target.dataset.turn), e.target.value));
+  });
   $("heroRec")?.addEventListener("click", () => toggleRec());
   if (note.audioId) mountAudio(note.audioId);
   if (state.pane === "conversation") requestAnimationFrame(() => $("convoDraft")?.focus());
@@ -609,7 +618,7 @@ async function speakNote(note) {
         return;
       } catch (err) {
         if (err.message === "canceled") return;
-        showToast("Studio voices unavailable — using system speech");
+        showToast("Studio voices unavailable, so using system speech");
       }
     } else if (!state.ttsReady && turns.length > 1) {
       showToast("Using system voices. Offline Ready loads the natural studio pack.");
@@ -912,7 +921,7 @@ async function startRec() {
     recSpeech.onend = () => { if (state.rec === "recording") try { recSpeech.start(); } catch {} };
     try { recSpeech.start(); } catch {}
   } else if (!navigator.onLine) {
-    showToast("Offline — audio is saved; Whisper will transcribe after you stop.");
+    showToast("Offline. Audio is saved, and Whisper will transcribe it after you stop.");
   }
   recTimer = setInterval(() => { state.recMs = recAcc + Date.now() - recStarted; const t = document.querySelector(".timer"); if (t) t.textContent = formatDuration(state.recMs); }, 200);
   state.rec = "recording";

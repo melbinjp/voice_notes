@@ -1,4 +1,4 @@
-const CACHE = 'voice-notes-v14';
+const CACHE = 'voice-notes-v15';
 const SHELL = [
   './', './index.html', './app.js', './app-utils.js', './style.css',
   './manifest.json', './icon-192.png', './icon-512.png',

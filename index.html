@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="Private, offline voice studio. Record, transcribe, separate speakers, and speak notes back — entirely on your device." />
+  <meta name="description" content="Private, offline voice studio. Record, transcribe, separate speakers and hear notes read back, all on your device." />
   <meta name="theme-color" content="#0a0b0d" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.json" />
@@ -12,6 +12,14 @@
   <link rel="stylesheet" href="style.css" />
   <title>Voice Notes</title>
   <link rel="canonical" href="https://melbinjp.github.io/voice_notes/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="WeCanUseAI">
+  <meta property="og:title" content="Voice Notes">
+  <meta property="og:description" content="Private, offline voice studio. Record, transcribe, separate speakers and hear notes read back, all on your device.">
+  <meta property="og:url" content="https://melbinjp.github.io/voice_notes/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Voice Notes">
+  <meta name="twitter:description" content="Private, offline voice studio. Record, transcribe, separate speakers and hear notes read back, all on your device.">
   <script>
     (function () {
       try {
@@ -53,6 +61,12 @@
       <div class="section-label">Tags</div>
       <div class="tags" id="tagList"></div>
       <div class="note-list" id="noteList"></div>
+      <footer class="sidebar-foot" aria-label="WeCanUseAI">
+        <a href="https://wecanuseai.com/">WeCanUseAI</a>
+        <a href="https://wecanuseai.com/privacy">Privacy</a>
+        <a href="https://wecanuseai.com/terms">Terms</a>
+        <a href="https://wecanuseai.com/contact">Contact</a>
+      </footer>
     </aside>
 
     <div class="main">
@@ -142,7 +156,7 @@
       <ul class="pack-list">
         <li><div><strong>On-device storage</strong><span>Keeps models and notes if the browser would otherwise evict them</span></div><em id="packPersist">Needed</em></li>
         <li><div><strong>Whisper tiny</strong><span id="packWhisperHint">~40 MB, transcription without a server</span></div><em id="packWhisper">Needed</em></li>
-        <li><div><strong>Studio voices</strong><span id="packTtsHint">Kokoro on this device — Heart and Fenrir, not the system robot</span></div><em id="packTts">Needed</em></li>
+        <li><div><strong>Studio voices</strong><span id="packTtsHint">Kokoro on this device: Heart and Fenrir, not the system robot</span></div><em id="packTts">Needed</em></li>
         <li><div><strong>App shell cached</strong><span>Workers and pages stored in this browser</span></div><em id="packCache">Needed</em></li>
       </ul>
       <div class="meter hidden" id="packMeter"><div id="packMeterBar"></div></div>
@@ -183,6 +197,6 @@
   <input type="file" id="audioFile" accept="audio/*" multiple hidden />
   <div class="toast-wrap" id="toastContainer"></div>
 
-  <script type="module" src="app.js?v=14"></script>
+  <script type="module" src="app.js?v=15"></script>
 </body>
 </html>
