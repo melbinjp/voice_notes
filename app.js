@@ -979,6 +979,6 @@ async function importAudio(file) {
 }
 
 function esc(s) {
-  return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&", "<": "<", ">": ">", '"': """ }[c]));
+  return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 function escAttr(s) { return esc(s).replace(/'/g, "&#39;"); }
