@@ -395,3 +395,17 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Transcript that plays along with the recording */
+.text-modes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; }
+.text-modes [data-textmode] {
+  border: 1px solid var(--border); background: transparent; color: inherit;
+  border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.text-modes [data-textmode].active { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.text-modes [data-textmode][disabled] { opacity: 0.45; cursor: not-allowed; }
+.words { line-height: 1.9; font-size: calc(17px * var(--vn-font-scale, 1)); padding: 12px 2px; max-height: 55vh; overflow: auto; }
+.words .w { cursor: pointer; border-radius: 4px; padding: 1px 2px; transition: background 0.12s; }
+.words .w:hover { background: color-mix(in oklab, var(--fg) 8%, transparent); }
+.words .w.active { background: color-mix(in oklab, var(--record) 32%, transparent); }
+.words .w.editing { outline: 2px solid color-mix(in oklab, var(--record) 55%, transparent); background: var(--surface); }

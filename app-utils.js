@@ -281,14 +281,6 @@ export class WaveformVisualizer {
   }
 }
 
-export const LANGUAGES = [
-  { code: "en-US", name: "English (US)" }, { code: "en-GB", name: "English (UK)" },
-  { code: "es-ES", name: "Spanish" }, { code: "fr-FR", name: "French" },
-  { code: "de-DE", name: "German" }, { code: "it-IT", name: "Italian" },
-  { code: "pt-BR", name: "Portuguese" }, { code: "hi-IN", name: "Hindi" },
-  { code: "ja-JP", name: "Japanese" }, { code: "zh-CN", name: "Chinese" },
-];
-
 export function seedLibrary() {
   const now = Date.now();
   const folders = [

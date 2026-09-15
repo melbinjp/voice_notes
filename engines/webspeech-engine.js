@@ -53,38 +53,8 @@ class WebSpeechEngine {
         'audio/webm'
       ],
       maxFileSize: 50 * 1024 * 1024, // 50MB (browser limitations)
-      languages: [
-        { code: 'en-US', name: 'English (US)' },
-        { code: 'en-GB', name: 'English (UK)' },
-        { code: 'en-AU', name: 'English (Australia)' },
-        { code: 'en-CA', name: 'English (Canada)' },
-        { code: 'en-IN', name: 'English (India)' },
-        { code: 'es-ES', name: 'Spanish (Spain)' },
-        { code: 'es-MX', name: 'Spanish (Mexico)' },
-        { code: 'fr-FR', name: 'French (France)' },
-        { code: 'fr-CA', name: 'French (Canada)' },
-        { code: 'de-DE', name: 'German (Germany)' },
-        { code: 'it-IT', name: 'Italian (Italy)' },
-        { code: 'pt-BR', name: 'Portuguese (Brazil)' },
-        { code: 'pt-PT', name: 'Portuguese (Portugal)' },
-        { code: 'ru-RU', name: 'Russian (Russia)' },
-        { code: 'zh-CN', name: 'Chinese (Simplified)' },
-        { code: 'zh-TW', name: 'Chinese (Traditional)' },
-        { code: 'ja-JP', name: 'Japanese (Japan)' },
-        { code: 'ko-KR', name: 'Korean (Korea)' },
-        { code: 'nl-NL', name: 'Dutch (Netherlands)' },
-        { code: 'pl-PL', name: 'Polish (Poland)' },
-        { code: 'sv-SE', name: 'Swedish (Sweden)' },
-        { code: 'da-DK', name: 'Danish (Denmark)' },
-        { code: 'fi-FI', name: 'Finnish (Finland)' },
-        { code: 'no-NO', name: 'Norwegian (Norway)' },
-        { code: 'tr-TR', name: 'Turkish (Turkey)' },
-        { code: 'ar-SA', name: 'Arabic (Saudi Arabia)' },
-        { code: 'he-IL', name: 'Hebrew (Israel)' },
-        { code: 'hi-IN', name: 'Hindi (India)' },
-        { code: 'th-TH', name: 'Thai (Thailand)' },
-        { code: 'vi-VN', name: 'Vietnamese (Vietnam)' }
-      ],
+      // Any language the browser accepts: the app builds the list from the Whisper model (engines/languages.js).
+      languages: [],
       qualitySettings: {
         deduplicationWindow: 2000,
         similarityThreshold: 0.8,
@@ -327,17 +297,8 @@ class WebSpeechEngine {
 
   // Set language
   async setLanguage(languageCode) {
-    const metadata = WebSpeechEngine.getMetadata();
-    const language = metadata.languages.find(lang => lang.code === languageCode);
-    
-    if (!language) {
-      throw new Error(`Language '${languageCode}' not supported`);
-    }
-    
-    if (this.recognition) {
-      this.recognition.lang = languageCode;
-      console.log(`Language set to: ${language.name} (${languageCode})`);
-    }
+    // Not checked against a list. A tag the browser cannot recognise reports language-not-supported.
+    if (this.recognition && languageCode) this.recognition.lang = languageCode;
   }
 
   // Configure recognition settings

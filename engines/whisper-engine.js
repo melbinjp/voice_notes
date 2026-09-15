@@ -55,19 +55,8 @@ class WhisperEngine {
                 'audio/webm'
             ],
             maxFileSize: 100 * 1024 * 1024, // 100MB
-            languages: [
-                { code: 'auto', name: 'Automatic Detection' },
-                { code: 'en', name: 'English' },
-                { code: 'es', name: 'Spanish' },
-                { code: 'fr', name: 'French' },
-                { code: 'de', name: 'German' },
-                { code: 'it', name: 'Italian' },
-                { code: 'pt', name: 'Portuguese' },
-                { code: 'nl', name: 'Dutch' },
-                { code: 'ru', name: 'Russian' },
-                { code: 'zh', name: 'Chinese' },
-                { code: 'ja', name: 'Japanese' }
-            ]
+            // Every language in the model's generation_config.json; the app reads it (engines/languages.js).
+            languages: []
         };
     }
 
@@ -198,7 +187,7 @@ class WhisperEngine {
                             duration,
                             engine: 'whisper',
                             confidence: 0.95,
-                            language: 'en'
+                            language: this.language || 'auto'
                         });
                     } else if (e.data.status === 'error') {
                         this.worker.removeEventListener('message', messageHandler);

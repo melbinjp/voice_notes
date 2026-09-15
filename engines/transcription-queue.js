@@ -151,7 +151,8 @@ class TranscriptionQueue extends EventTarget {
                     action: 'transcribe',
                     audioData,
                     sampleRate: 16000,
-                    language: this._language,
+                    // Per item, so a note timed in one language and a file in another can share the queue.
+                    language: item.meta?.language || this._language,
                     id: msgId,
                 });
             });

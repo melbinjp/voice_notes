@@ -2,7 +2,7 @@ import {
   applyTheme, getStoredTheme, toggleTheme, applyFontScale, showToast, uid, wordCount,
   titleFromTranscript, formatDuration, dateGroup, summarizeLocal, applyDictationPunctuation,
   exportNote, downloadFile, loadAllNotes, loadFolders, saveNote, saveFolder, deleteNote,
-  putAudio, getAudio, getFlag, setFlag, importLegacyNotes, WaveformVisualizer, LANGUAGES, seedLibrary,
+  putAudio, getAudio, getFlag, setFlag, importLegacyNotes, WaveformVisualizer, seedLibrary,
 } from "./app-utils.js";
 import transcriptionQueue from "./engines/transcription-queue.js";
 import { diarizeBlob, dialogueText, parseLabeledTranscript } from "./engines/diarize.js";
@@ -10,6 +10,10 @@ import {
   STUDIO_VOICES, CONVO_VOICE_CYCLE, CONVO_NAMES, speakText, speakTurns, stopSpeaking,
   preloadNeuralTts, generateNeuralSpeech, playNeuralTurns, ttsSupported, resolveStudioVoice,
 } from "./engines/tts.js";
+import { loadLanguages, languageName, speechTag, whisperCode } from "./engines/languages.js";
+import {
+  wordsFromChunks, textFromWords, estimateWords, realign, alignText, activeIndex, cuesFromWords, labelCues, toSrt, toVtt,
+} from "./engines/timeline.js";
 
 const SPEAKER_COLORS = ["#d4785a", "#5b8f8a", "#c9a15b", "#7a8aa8"];
 
@@ -31,11 +35,12 @@ const state = {
   whisperReady: false,
   tab: "note",
   pane: "text",
+  textMode: "play",
   convoWho: "",
   settings: {
     theme: getStoredTheme(),
     fontScale: localStorage.getItem("vn:fontScale") || localStorage.getItem("vn-fontsize") || "100",
-    language: localStorage.getItem("vn-lang") || "en-US",
+    language: storedLanguage(),
     engine: "webspeech",
     autoTitle: true,
     autoSummarize: true,
@@ -49,9 +54,33 @@ const state = {
 
 let recStream, recRecorder, recChunks = [], recMime = "", recSpeech, recTimer, recStarted = 0, recAcc = 0, recFinal = "", recNoteId = null;
 let speakAudio = null;
+let audioUrl = null;
+let audioResume = { id: null, time: 0 };
 
 function speechCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+// Stored as a bare language code, or "auto". Older versions stored a regional tag such as en-US.
+function storedLanguage() {
+  const raw = localStorage.getItem("vn-lang") || "auto";
+  return raw === "auto" ? raw : raw.split("-")[0].toLowerCase();
+}
+
+// The list is every language the Whisper model knows, so it is drawn once with what is at hand
+// and again when the model's own list arrives.
+async function fillLanguages() {
+  const sel = $("languageSelector");
+  const draw = (list) => {
+    const current = state.settings.language;
+    const listed = current === "auto" || list.some((l) => l.code === current);
+    sel.innerHTML = `<option value="auto">${esc(languageName("auto"))}</option>`
+      + (listed ? "" : `<option value="${escAttr(current)}">${esc(languageName(current))}</option>`)
+      + list.map((l) => `<option value="${escAttr(l.code)}">${esc(l.name)}</option>`).join("");
+    sel.value = current;
+  };
+  draw([]);
+  draw(await loadLanguages());
 }
 
 function withSpeakers(n) {
@@ -73,8 +102,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("autoDiarize").checked = state.settings.autoDiarize;
   $("dictationPunctuation").checked = state.settings.dictationPunctuation;
   $("speakerCount").value = state.settings.speakerCount;
-  $("languageSelector").innerHTML = LANGUAGES.map((l) => `<option value="${l.code}">${l.name}</option>`).join("");
-  $("languageSelector").value = state.settings.language;
+  void fillLanguages();
   $("ttsVoice").innerHTML = STUDIO_VOICES.map((v) => `<option value="${v.id}">${v.name} · ${v.hint}</option>`).join("");
   $("ttsVoice").value = state.settings.ttsVoiceId;
 
@@ -304,9 +332,7 @@ function renderEditor() {
       <button class="${state.pane !== "conversation" ? "active" : ""}" data-pane="text">Transcript</button>
       <button class="${state.pane === "conversation" ? "active" : ""}" data-pane="conversation">Conversation${speakers.length ? ` · ${speakers.length}` : ""}</button>
     </div>
-    <div id="pane-text" class="${state.pane === "conversation" ? "hidden" : ""}">
-      <textarea class="transcript" id="transcript">${esc(note.transcript)}</textarea>
-    </div>
+    ${transcriptPaneHtml(note)}
     <div id="pane-conversation" class="${state.pane === "conversation" ? "" : "hidden"}">
       ${conversationHtml(note)}
     </div>
@@ -319,11 +345,39 @@ function renderEditor() {
       <button class="btn btn-secondary btn-sm" data-export="md">Markdown</button>
       <button class="btn btn-ghost btn-sm" data-export="txt">Text</button>
       <button class="btn btn-ghost btn-sm" data-export="json">JSON</button>
+      <button class="btn btn-ghost btn-sm" data-subs="srt">SRT</button>
+      <button class="btn btn-ghost btn-sm" data-subs="vtt">VTT</button>
       <button class="btn btn-ghost btn-sm" id="delBtn">Delete</button>
     </div>
   </article>`;
-  $("titleInput")?.addEventListener("input", (e) => patch(note.id, { title: e.target.value }));
-  $("transcript")?.addEventListener("input", (e) => patch(note.id, { transcript: e.target.value }));
+  // Typing saves without rebuilding the editor, which would drop the cursor after every key.
+  $("titleInput")?.addEventListener("input", (e) => patch(note.id, { title: e.target.value }, { quiet: true }));
+  $("transcript")?.addEventListener("input", (e) => {
+    const current = state.notes.find((n) => n.id === note.id);
+    const timedWords = (current?.timedWords || []).length ? realign(current.timedWords, e.target.value) : [];
+    patch(note.id, { transcript: e.target.value, timedWords }, { quiet: true });
+  });
+  root.querySelectorAll("[data-textmode]").forEach((b) => b.addEventListener("click", () => {
+    state.textMode = b.dataset.textmode;
+    renderEditor();
+  }));
+  $("syncWordsBtn")?.addEventListener("click", () => syncWords(note.id));
+  root.querySelectorAll("[data-subs]").forEach((b) => b.addEventListener("click", () =>
+    exportSubtitles(state.notes.find((n) => n.id === note.id) || note, b.dataset.subs)));
+  $("words")?.addEventListener("click", (e) => {
+    const span = e.target.closest("[data-w]");
+    if (!span || span.isContentEditable) return;
+    const word = (state.notes.find((n) => n.id === note.id)?.timedWords || [])[Number(span.dataset.w)];
+    const audio = $("noteAudio");
+    if (!word || !audio) return;
+    // Exactly the word's start: any earlier lands in the previous word's highlight window.
+    audio.currentTime = word.start;
+    audio.play().catch(() => {});
+  });
+  $("words")?.addEventListener("dblclick", (e) => {
+    const span = e.target.closest("[data-w]");
+    if (span) editWord(note.id, span);
+  });
   $("pinBtn")?.addEventListener("click", () => patch(note.id, { pinned: !note.pinned }));
   $("sumBtn")?.addEventListener("click", () => doSummary(note.id));
   $("sumBtn2")?.addEventListener("click", () => doSummary(note.id));
@@ -405,11 +459,42 @@ async function mountAudio(id) {
   const rec = await getAudio(id);
   const bar = $("audioBar");
   if (!rec || !bar) return;
-  const url = URL.createObjectURL(rec.blob);
-  bar.innerHTML = `<audio controls src="${url}" style="width:100%"></audio>`;
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = URL.createObjectURL(rec.blob);
+  bar.innerHTML = `<audio controls id="noteAudio" preload="metadata" src="${audioUrl}" style="width:100%"></audio>`;
+  const audio = $("noteAudio");
+  // A re-render rebuilds the player, so the position is carried over and a correction does not rewind.
+  if (audioResume.id === id && audioResume.time > 0) {
+    const at = audioResume.time;
+    audio.addEventListener("loadedmetadata", () => { audio.currentTime = Math.min(at, audio.duration || at); }, { once: true });
+  }
+  let lit = -1;
+  const paint = () => {
+    if (!audio.isConnected) return;
+    audioResume = { id, time: audio.currentTime };
+    const words = state.notes.find((n) => n.id === id)?.timedWords || [];
+    const i = activeIndex(words, audio.currentTime);
+    if (i === lit) return;
+    const box = $("words");
+    box?.querySelector(`[data-w="${lit}"]`)?.classList.remove("active");
+    lit = i;
+    const el = i >= 0 ? box?.querySelector(`[data-w="${i}"]`) : null;
+    if (el && !el.isContentEditable) {
+      el.classList.add("active");
+      el.scrollIntoView({ block: "nearest" });
+    }
+  };
+  let raf = 0;
+  const loop = () => {
+    paint();
+    if (!audio.paused && audio.isConnected) raf = requestAnimationFrame(loop);
+  };
+  audio.addEventListener("play", () => { cancelAnimationFrame(raf); loop(); });
+  audio.addEventListener("seeked", paint);
+  audio.addEventListener("pause", paint);
 }
 
-async function patch(id, p) {
+async function patch(id, p, opts = {}) {
   const current = state.notes.find((n) => n.id === id);
   if (!current) return;
   let next = p;
@@ -423,7 +508,8 @@ async function patch(id, p) {
   state.notes = state.notes.map((n) => n.id === id ? withSpeakers({ ...n, ...next, updatedAt: Date.now() }) : n);
   const n = state.notes.find((x) => x.id === id);
   if (n) await saveNote(n);
-  render();
+  // A quiet save still redraws when the text turned into a conversation, since the pane changes.
+  if (!opts.quiet || next !== p) render();
 }
 
 async function createNote(partial = {}) {
@@ -670,10 +756,11 @@ async function prepareOffline() {
       setPackRow("packPersist", ok);
     }
     if ("caches" in window) {
-      const cache = await caches.open("voice-notes-v14");
+      const cache = await caches.open("voice-notes-v16");
       await Promise.all([
         "./", "./index.html", "./app.js", "./app-utils.js", "./style.css",
         "./engines/tts-worker.js", "./engines/whisper-worker.js", "./engines/diarize.js", "./engines/tts.js",
+        "./engines/languages.js", "./engines/timeline.js", "./engines/transcription-queue.js",
       ].map((u) => cache.add(u).catch(() => undefined)));
       setPackRow("packCache", true);
     }
@@ -817,11 +904,31 @@ function wire() {
   });
   transcriptionQueue.addEventListener("itemdone", async (e) => {
     const item = e.detail;
+    const words = wordsFromChunks(item.chunks);
+    const target = item.meta?.noteId ? state.notes.find((n) => n.id === item.meta.noteId) : null;
+    if (target) {
+      // The result belongs to the note that holds the audio. With align set, the note keeps its
+      // own text (live captions, or what the person typed) and only takes Whisper's timings.
+      const written = item.meta.align && (target.transcript || "").trim();
+      if (!written && !item.transcript) { showToast("Whisper heard no speech in this audio"); return; }
+      const transcript = written ? target.transcript : item.transcript;
+      const renamed = !written && state.settings.autoTitle && /^(Recording|Untitled note)$/.test(target.title);
+      await patch(target.id, {
+        transcript,
+        timedWords: written ? alignText(words, transcript) : words,
+        engine: written ? target.engine : "whisper",
+        ...(renamed ? { title: titleFromTranscript(transcript) } : {}),
+        ...(!written && state.settings.autoSummarize ? { summary: summarizeLocal(transcript) } : {}),
+      });
+      showToast(written ? "Words are timed to the audio" : `Transcribed “${state.notes.find((n) => n.id === target.id)?.title || target.title}”`);
+      if (state.settings.autoDiarize && target.audioId && !(target.speakers || []).length) void diarizeNote(target.id);
+      return;
+    }
     if (!item.transcript) return;
-    const note = await createNote({ title: item.name, transcript: item.transcript, engine: "whisper", summary: state.settings.autoSummarize ? summarizeLocal(item.transcript) : "" });
+    const note = await createNote({ title: item.name, transcript: item.transcript, timedWords: words, engine: "whisper", summary: state.settings.autoSummarize ? summarizeLocal(item.transcript) : "" });
     showToast(`Transcribed “${note.title}”`);
-    if (state.settings.autoDiarize && note.audioId) void diarizeNote(note.id);
   });
+  transcriptionQueue.addEventListener("itemerror", (e) => showToast(`Transcription failed: ${e.detail?.error || "unknown error"}`));
   window.addEventListener("keydown", onKey);
 }
 
@@ -905,7 +1012,14 @@ async function startRec() {
     recSpeech = new Ctor();
     recSpeech.continuous = true;
     recSpeech.interimResults = true;
-    recSpeech.lang = state.settings.language;
+    recSpeech.lang = speechTag(state.settings.language);
+    recSpeech.onerror = (ev) => {
+      if (ev.error !== "language-not-supported") return;
+      showToast(`Live captions do not cover ${languageName(state.settings.language)} in this browser. Whisper transcribes it when you stop.`);
+      const live = recSpeech;
+      recSpeech = null;
+      try { live?.stop(); } catch {}
+    };
     recSpeech.onresult = (ev) => {
       let fin = "", inter = "";
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -968,12 +1082,15 @@ async function stopRec() {
   const note = state.notes.find((n) => n.id === recNoteId);
   if (state.settings.autoSummarize && note?.transcript) await doSummary(recNoteId);
   const useWhisper = blob && (!recFinal || state.settings.engine === "whisper" || !navigator.onLine);
+  const meta = { noteId: recNoteId, language: whisperCode(state.settings.language) };
   if (useWhisper && blob) {
-    transcriptionQueue.setLanguage(state.settings.language.startsWith("en") ? "en" : "auto");
-    transcriptionQueue.enqueue(blob, note?.title || "Recording");
+    transcriptionQueue.enqueue(blob, note?.title || "Recording", meta);
   } else {
     showToast("Saved to library");
-    if (blob && state.settings.autoDiarize) void diarizeNote(recNoteId);
+    // Live captions carry no word timings. With Whisper already on this device the words are
+    // timed now, so the note plays along and exports subtitles; otherwise that waits for a tap.
+    if (blob && state.whisperReady) transcriptionQueue.enqueue(blob, note?.title || "Recording", { ...meta, align: true });
+    else if (blob && state.settings.autoDiarize) void diarizeNote(recNoteId);
   }
   recNoteId = null;
 }
@@ -982,9 +1099,89 @@ async function importAudio(file) {
   const note = await createNote({ title: file.name.replace(/\.[^.]+$/, ""), engine: "upload" });
   await putAudio(note.id, file, file.type);
   await patch(note.id, { audioId: note.id, audioMime: file.type });
-  transcriptionQueue.setLanguage("auto");
-  transcriptionQueue.enqueue(file, file.name);
+  transcriptionQueue.enqueue(file, file.name, { noteId: note.id, language: whisperCode(state.settings.language) });
   showToast("Queued for transcription");
+}
+
+function transcriptPaneHtml(note) {
+  const timed = Boolean(note.audioId && (note.timedWords || []).length);
+  const mode = timed && state.textMode === "play" ? "play" : "edit";
+  const modes = note.audioId
+    ? `<div class="text-modes">
+        <button type="button" class="${mode === "play" ? "active" : ""}" data-textmode="play" ${timed ? "" : "disabled"}>Play along</button>
+        <button type="button" class="${mode === "edit" ? "active" : ""}" data-textmode="edit">Edit text</button>
+        ${timed ? "" : `<button type="button" class="btn btn-ghost btn-sm" id="syncWordsBtn">Time words to audio</button>`}
+      </div>`
+    : "";
+  const body = mode === "play"
+    ? `<div class="words" id="words">${(note.timedWords || []).map((w, i) => `<span class="w" data-w="${i}">${esc(w.text)}</span>`).join(" ")}</div>
+       <p class="hint muted">Click a word to play from it. Double-click a word to correct it.</p>`
+    : `<textarea class="transcript" id="transcript">${esc(note.transcript)}</textarea>`;
+  return `<div id="pane-text" class="${state.pane === "conversation" ? "hidden" : ""}">${modes}${body}</div>`;
+}
+
+// Correct one word in place. It keeps its timing; typing several words splits that time between them.
+function editWord(noteId, span) {
+  $("noteAudio")?.pause();
+  const index = Number(span.dataset.w);
+  span.contentEditable = "true";
+  span.classList.add("editing");
+  span.focus();
+  document.getSelection()?.selectAllChildren(span);
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    span.contentEditable = "false";
+    const current = state.notes.find((n) => n.id === noteId);
+    const word = current?.timedWords?.[index];
+    const text = span.textContent.replace(/\s+/g, " ").trim();
+    if (!current || !word || !save || text === word.text) { renderEditor(); return; }
+    const parts = text.split(" ").filter(Boolean);
+    const step = (word.end - word.start) / Math.max(parts.length, 1);
+    const timedWords = current.timedWords.flatMap((w, j) => j !== index ? [w]
+      : parts.map((t, k) => ({ text: t, start: w.start + k * step, end: w.start + (k + 1) * step })));
+    await patch(noteId, { timedWords, transcript: textFromWords(timedWords) });
+  };
+  span.addEventListener("blur", () => finish(true), { once: true });
+  span.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+}
+
+function exportSubtitles(note, format) {
+  let cues = [];
+  let estimated = false;
+  if ((note.timedWords || []).length) {
+    cues = cuesFromWords(note.timedWords);
+  } else if ((note.speakerTurns || []).length) {
+    cues = note.speakerTurns.filter((t) => t.text.trim()).map((t) => ({ start: t.start, end: t.end, text: t.text }));
+  } else if ((note.transcript || "").trim() && note.durationMs) {
+    cues = cuesFromWords(estimateWords(note.transcript, note.durationMs / 1000));
+    estimated = true;
+  }
+  if (!cues.length) {
+    showToast(note.audioId ? "Time words to audio first, then export subtitles" : "Subtitles need a recording or a conversation");
+    return;
+  }
+  cues = labelCues(cues, note.speakers, note.speakerTurns);
+  const safe = (note.title || "voice-note").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  downloadFile(`${safe}.${format}`, format === "vtt" ? toVtt(cues) : toSrt(cues), format === "vtt" ? "text/vtt" : "application/x-subrip");
+  showToast(estimated ? "Subtitles saved with estimated timings. Time words to audio for exact ones." : "Subtitles saved");
+}
+
+async function syncWords(noteId) {
+  const note = state.notes.find((n) => n.id === noteId);
+  if (!note?.audioId) return;
+  const rec = await getAudio(note.audioId);
+  if (!rec) { showToast("Audio is missing for this note"); return; }
+  transcriptionQueue.enqueue(rec.blob, note.title, {
+    noteId,
+    align: true,
+    language: whisperCode(note.language || state.settings.language),
+  });
+  showToast("Timing words to the audio on this device");
 }
 
 function esc(s) {
